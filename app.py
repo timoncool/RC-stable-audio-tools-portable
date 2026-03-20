@@ -100,6 +100,9 @@ from stable_audio_tools.interface.gradio import (
     load_model_action,
 )
 
+APP_NAME = "RC Stable Audio Tools"
+APP_VERSION = "1.0"
+
 # Доступные модели для скачивания
 HF_MODELS = [
     "RoyalCities/Foundation-1",
@@ -232,15 +235,76 @@ def random_prompt():
 
 
 def build_ui():
-    """Строит Gradio UI на русском языке."""
+    """Строит Gradio UI."""
 
-    with gr.Blocks(
-        title="RC Stable Audio Tools -- Portable RU",
-        theme=gr.themes.Base(primary_hue="orange"),
-    ) as app:
+    css = """
+    .gradio-container {max-width: none !important;}
 
-        gr.Markdown("# RC Stable Audio Tools -- Portable RU")
-        gr.Markdown("Генерация музыки и аудио по текстовому описанию")
+    .main-header {
+        background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+        padding: 1.5rem 2rem;
+        border-radius: 15px;
+        margin-bottom: 1rem;
+        box-shadow: 0 10px 30px rgba(102, 126, 234, 0.2);
+    }
+    .main-header h1 {
+        color: white;
+        font-size: 2rem;
+        font-weight: 700;
+        margin: 0;
+        text-shadow: 0 2px 4px rgba(0,0,0,0.2);
+    }
+    .main-header p {
+        color: rgba(255,255,255,0.9);
+        margin: 0.5rem 0 0 0;
+    }
+    .main-header a {
+        color: white !important;
+        text-decoration: underline;
+    }
+
+    .tab-nav button {
+        font-size: 1rem !important;
+        padding: 0.75rem 1.5rem !important;
+    }
+
+    .prose {
+        color: #e2e8f0 !important;
+    }
+    """
+
+    theme = gr.themes.Soft(
+        font=[gr.themes.GoogleFont("Inter"), "Arial", "sans-serif"],
+        primary_hue="indigo",
+        secondary_hue="purple",
+    )
+
+    # Темная тема по умолчанию
+    js = """
+    () => {
+        const url = new URL(window.location);
+        if (url.searchParams.get('__theme') !== 'dark') {
+            url.searchParams.set('__theme', 'dark');
+            window.location.href = url.href;
+        }
+    }
+    """
+
+    with gr.Blocks(theme=theme, css=css, title=APP_NAME, js=js) as app:
+
+        # Заголовок с кредитами
+        gr.HTML(f"""
+        <div class="main-header">
+            <h1>{APP_NAME} v{APP_VERSION}</h1>
+            <p>Генерация музыки и аудио по текстовому описанию</p>
+            <p style="font-size: 0.85rem; opacity: 0.9; margin-top: 0.5rem;">
+                Собрал <a href="https://t.me/nerual_dreming" target="_blank">Nerual Dreaming</a> — основатель <a href="https://artgeneration.me/" target="_blank">ArtGeneration.me</a>, техноблогер и нейро-евангелист.
+            </p>
+            <p style="font-size: 0.85rem; opacity: 0.9; margin-top: 0.3rem;">
+                <a href="https://t.me/neuroport" target="_blank">Нейро-Софт</a> — репаки и портативки полезных нейросетей
+            </p>
+        </div>
+        """)
 
         with gr.Tabs():
             # ==========================================
@@ -365,15 +429,6 @@ def build_ui():
                     interactive=False,
                 )
 
-        # Футер
-        gr.Markdown(
-            "---\n"
-            "**RC Stable Audio Tools -- Portable RU** | "
-            "[@Nerual Dreaming](https://t.me/neuroport) | "
-            "[GitHub](https://github.com/timoncool/RC-stable-audio-tools-portable) | "
-            "Оригинал: [RoyalCities/RC-stable-audio-tools](https://github.com/RoyalCities/RC-stable-audio-tools)"
-        )
-
         # ==========================================
         # Привязка событий
         # ==========================================
@@ -416,7 +471,7 @@ def main():
     torch.manual_seed(42)
 
     print("=" * 60)
-    print("  RC Stable Audio Tools -- Portable RU")
+    print(f"  {APP_NAME} v{APP_VERSION} -- Portable RU")
     print("  Генерация музыки и аудио по текстовому описанию")
     print("=" * 60)
     print()
