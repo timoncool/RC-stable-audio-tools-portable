@@ -46,40 +46,20 @@ if sys.platform == "win32":
     except (ImportError, AttributeError):
         pass
 
-import gc
 import json
-import platform
-import time
-import numpy as np
-import gradio as gr
-import torch
-import torchaudio
-import random
-import math
-import re
 
 # ============================================================
-# Импорты из stable_audio_tools
-# ============================================================
-from stable_audio_tools import get_pretrained_model
-from stable_audio_tools.interface.gradio import (
-    load_model,
-    create_ui,
-)
-
-# ============================================================
-# Конфигурация
+# Конфигурация — ОБЯЗАТЕЛЬНО ДО импорта stable_audio_tools!
+# Библиотека читает config.json при загрузке модуля.
 # ============================================================
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.path.join(SCRIPT_DIR, "RC-stable-audio-tools", "config.json")
 MODELS_DIR = os.path.join(SCRIPT_DIR, "models")
 GENERATIONS_DIR = os.path.join(SCRIPT_DIR, "generations")
 
-# Создаем директории
 os.makedirs(MODELS_DIR, exist_ok=True)
 os.makedirs(GENERATIONS_DIR, exist_ok=True)
 
-# Подменяем пути в конфиге
 if os.path.exists(CONFIG_PATH):
     with open(CONFIG_PATH, "r", encoding="utf-8") as f:
         config = json.load(f)
@@ -101,10 +81,14 @@ else:
         }]
     }
 
-# Записываем обновленный конфиг для библиотеки
-config_write_path = os.path.join(SCRIPT_DIR, "config.json")
-with open(config_write_path, "w", encoding="utf-8") as f:
+with open(os.path.join(SCRIPT_DIR, "config.json"), "w", encoding="utf-8") as f:
     json.dump(config, f, indent=4, ensure_ascii=False)
+
+# ============================================================
+# Теперь безопасно импортировать библиотеку
+# ============================================================
+import torch
+from stable_audio_tools.interface.gradio import create_ui
 
 
 def main():
