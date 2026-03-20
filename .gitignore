@@ -1,0 +1,30 @@
+# Python Embeddable
+python/
+Lib/
+
+# Скачанные файлы
+downloads/
+
+# Модели и кэш
+models/
+cache/
+temp/
+generations/
+
+# Клонированная библиотека
+RC-stable-audio-tools/
+
+# Конфигурация GPU
+cuda_version.txt
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Секреты
+*.env
+
+# Системные
+Thumbs.db
+.DS_Store
