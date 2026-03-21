@@ -9,6 +9,10 @@
 
 > **Если проект полезен — поставьте звёздочку!** Это помогает другим находить проект и мотивирует на развитие.
 
+## Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=timoncool/RC-stable-audio-tools-portable&type=Date)](https://star-history.com/#timoncool/RC-stable-audio-tools-portable&Date)
+
 ## Скриншоты
 
 ### Генерация музыки
