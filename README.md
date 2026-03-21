@@ -1,17 +1,11 @@
 # Foundation Music Lab
 
-[![Stars](https://img.shields.io/github/stars/timoncool/RC-stable-audio-tools-portable?style=social)](https://github.com/timoncool/RC-stable-audio-tools-portable/stargazers)
-[![License](https://img.shields.io/github/license/timoncool/RC-stable-audio-tools-portable)](LICENSE)
+[![Stars](https://img.shields.io/github/stars/timoncool/Foundation-Music-Lab?style=social)](https://github.com/timoncool/Foundation-Music-Lab/stargazers)
+[![License](https://img.shields.io/github/license/timoncool/Foundation-Music-Lab)](LICENSE)
 
 Улучшенный и оптимизированный под модель Foundation_1 форк [RC Stable Audio Tools](https://github.com/RoyalCities/RC-stable-audio-tools) со встроенным редактором треков.
 
 Портативная русскоязычная версия для Windows.
-
-> **Если проект полезен — поставьте звёздочку!** Это помогает другим находить проект и мотивирует на развитие.
-
-## Star History
-
-[![Star History Chart](https://api.star-history.com/svg?repos=timoncool/RC-stable-audio-tools-portable&type=Date)](https://star-history.com/#timoncool/RC-stable-audio-tools-portable&Date)
 
 ## Скриншоты
 
@@ -60,7 +54,7 @@
 1. Установите [Git](https://git-scm.com/downloads) если ещё не установлен
 2. Скачайте архив из [Releases](../../releases) или клонируйте репозиторий:
    ```
-   git clone https://github.com/timoncool/RC-stable-audio-tools-portable.git
+   git clone https://github.com/timoncool/Foundation-Music-Lab.git
    ```
 3. Запустите `install.bat`
 4. Выберите вашу видеокарту
@@ -79,7 +73,7 @@
 ## Структура папок
 
 ```
-RC-stable-audio-tools-portable/
+Foundation-Music-Lab/
 ├── app.py              — основной файл приложения
 ├── editor/             — таймлайн-редактор
 ├── install.bat          — установщик
@@ -121,7 +115,13 @@ RC-stable-audio-tools-portable/
 
 ## Авторы
 
-- **@Nerual Dreaming** — портативная версия
-- **Нейро-Софт** ([t.me/neuroport](https://t.me/neuroport)) — репаки нейросетей
+- **@Nerual Dreaming** — [neuro-cartel.com](https://neuro-cartel.com) | основатель [ArtGeneration.me](https://artgeneration.me)
+- **Нейро-Софт** ([t.me/neuroport](https://t.me/neuroport)) — репаки и портативки нейросетей
 - **RoyalCities** — оригинальный проект RC-stable-audio-tools
 - **Stability AI** — модель Stable Audio
+
+---
+
+> **Если проект полезен — поставьте звёздочку!** Это помогает другим находить проект и мотивирует на развитие.
+
+[![Star History Chart](https://api.star-history.com/svg?repos=timoncool/Foundation-Music-Lab&type=Date)](https://star-history.com/#timoncool/Foundation-Music-Lab&Date)
