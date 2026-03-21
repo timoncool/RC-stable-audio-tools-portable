@@ -5,20 +5,25 @@
 (function() {
 'use strict';
 
-var TRACK_HEIGHT = 80;
-var HEADER_WIDTH = 160;
-var RULER_HEIGHT = 28;
+var TRACK_HEIGHT = 86;
+var HEADER_WIDTH = 170;
+var RULER_HEIGHT = 30;
 var PIXELS_PER_SEC = 100; // default zoom
 var SEGMENT_COLOR = '#667eea';
 var SEGMENT_ACTIVE_COLOR = '#8b9cf7';
-var WAVE_COLOR = '#b8c4ff';
-var BG_COLOR = '#141414';
+var SEGMENT_BORDER_COLOR = '#4a5acc';
+var WAVE_COLOR = '#c0ccff';
+var BG_COLOR = '#111';
 var TRACK_BG = '#1a1a1a';
-var TRACK_LINE = '#252525';
-var HEADER_BG = '#1f1f1f';
-var TEXT_COLOR = '#ccc';
+var TRACK_BG_ALT = '#1d1d1d';
+var TRACK_LINE = '#2a2a2a';
+var HEADER_BG = '#1c1c1c';
+var HEADER_BORDER = '#2a2a2a';
+var TEXT_COLOR = '#bbb';
 var CURSOR_COLOR = '#ff6b6b';
-var MIN_SEGMENT_WIDTH = 5; // px
+var HANDLE_COLOR = '#fff';
+var HANDLE_WIDTH = 6;
+var RESIZE_ZONE = 10; // px from edge for resize cursor
 
 function TimelineEditor(container) {
     this.container = container;
@@ -289,7 +294,7 @@ TimelineEditor.prototype._drawTrack = function(ctx, trackIdx, y, w) {
     var track = this.tracks[trackIdx];
 
     // Track background
-    ctx.fillStyle = trackIdx % 2 === 0 ? TRACK_BG : '#1d1d1d';
+    ctx.fillStyle = trackIdx % 2 === 0 ? TRACK_BG : TRACK_BG_ALT;
     ctx.fillRect(HEADER_WIDTH, y, w - HEADER_WIDTH, TRACK_HEIGHT);
 
     // Track line
@@ -336,6 +341,13 @@ TimelineEditor.prototype._drawSegment = function(ctx, trackIdx, segIdx, trackY) 
     ctx.closePath();
     ctx.fill();
 
+    // Segment border
+    ctx.strokeStyle = isSelected ? '#fff' : SEGMENT_BORDER_COLOR;
+    ctx.lineWidth = 1;
+    ctx.globalAlpha = isSelected ? 0.6 : 0.4;
+    ctx.stroke();
+    ctx.globalAlpha = this.tracks[trackIdx].muted ? 0.3 : 0.8;
+
     // Waveform
     if (seg.waveform && segW > 2) {
         ctx.save();
@@ -377,98 +389,159 @@ TimelineEditor.prototype._drawSegment = function(ctx, trackIdx, segIdx, trackY) 
         ctx.fillText(seg.name, x + 6, y + 14, segW - 12);
     }
 
-    // Resize handles (visible on hover/select)
+    // Selection outline + resize handles
     if (isSelected) {
-        ctx.fillStyle = '#fff';
-        ctx.globalAlpha = 0.6;
-        ctx.fillRect(x, y, 4, h);
-        ctx.fillRect(x + segW - 4, y, 4, h);
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 1.5;
+        ctx.globalAlpha = 0.5;
+        this._roundRect(ctx, x, y, segW, h, 4);
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+
+        // Left handle — 3 lines
+        ctx.strokeStyle = HANDLE_COLOR;
+        ctx.lineWidth = 1.5;
+        ctx.globalAlpha = 0.7;
+        var hx = x + 3;
+        var hMid = y + h / 2;
+        for (var li = -4; li <= 4; li += 4) {
+            ctx.beginPath();
+            ctx.moveTo(hx, hMid + li - 6);
+            ctx.lineTo(hx, hMid + li + 6);
+            ctx.stroke();
+        }
+        // Right handle
+        hx = x + segW - 3;
+        for (var li = -4; li <= 4; li += 4) {
+            ctx.beginPath();
+            ctx.moveTo(hx, hMid + li - 6);
+            ctx.lineTo(hx, hMid + li + 6);
+            ctx.stroke();
+        }
         ctx.globalAlpha = 1;
     }
 };
 
 TimelineEditor.prototype._drawTrackHeader = function(ctx, trackIdx, y) {
     var track = this.tracks[trackIdx];
+    if (!track.volume && track.volume !== 0) track.volume = 0.8;
 
-    // Header background
+    // Header background with subtle gradient
     ctx.fillStyle = HEADER_BG;
     ctx.fillRect(0, y, HEADER_WIDTH, TRACK_HEIGHT);
-    ctx.strokeStyle = '#333';
+
+    // Right border
+    ctx.strokeStyle = HEADER_BORDER;
     ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.moveTo(HEADER_WIDTH, y);
-    ctx.lineTo(HEADER_WIDTH, y + TRACK_HEIGHT);
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.moveTo(0, y + TRACK_HEIGHT);
-    ctx.lineTo(HEADER_WIDTH, y + TRACK_HEIGHT);
+    ctx.moveTo(HEADER_WIDTH - 0.5, y);
+    ctx.lineTo(HEADER_WIDTH - 0.5, y + TRACK_HEIGHT);
     ctx.stroke();
 
-    // Track name
+    // Bottom border
+    ctx.beginPath();
+    ctx.moveTo(0, y + TRACK_HEIGHT - 0.5);
+    ctx.lineTo(HEADER_WIDTH, y + TRACK_HEIGHT - 0.5);
+    ctx.stroke();
+
+    // Track name (truncated)
     ctx.fillStyle = '#e0e0e0';
     ctx.font = '11px Inter, Arial, sans-serif';
     ctx.textAlign = 'left';
-    ctx.fillText(track.name, 8, y + 16, HEADER_WIDTH - 16);
+    var maxNameW = HEADER_WIDTH - 16;
+    var displayName = track.name;
+    if (ctx.measureText(displayName).width > maxNameW) {
+        while (displayName.length > 3 && ctx.measureText(displayName + '...').width > maxNameW) {
+            displayName = displayName.slice(0, -1);
+        }
+        displayName += '...';
+    }
+    ctx.fillText(displayName, 10, y + 16);
 
-    // Buttons: M S X D
-    var btnY = y + 26;
-    var btnW = 24, btnH = 20, gap = 4;
-    var bx = 8;
+    // Buttons row: M  S  D  X
+    var btnY = y + 24;
+    var btnW = 26, btnH = 22, gap = 5;
+    var bx = 10;
 
     // M (Mute)
-    ctx.fillStyle = track.muted ? '#e04050' : '#333';
-    ctx.strokeStyle = track.muted ? '#e04050' : '#555';
-    ctx.lineWidth = 1;
-    this._roundRect(ctx, bx, btnY, btnW, btnH, 3);
-    ctx.fill();
-    ctx.stroke();
-    ctx.fillStyle = track.muted ? '#fff' : '#999';
-    ctx.font = 'bold 10px Inter, Arial, sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText('M', bx + btnW/2, btnY + 14);
+    this._drawButton(ctx, bx, btnY, btnW, btnH, 'M',
+        track.muted ? '#e04050' : '#2a2a2a',
+        track.muted ? '#e04050' : '#444',
+        track.muted ? '#fff' : '#888');
 
     // S (Solo)
     bx += btnW + gap;
-    ctx.fillStyle = track.solo ? '#667eea' : '#333';
-    ctx.strokeStyle = track.solo ? '#667eea' : '#555';
-    this._roundRect(ctx, bx, btnY, btnW, btnH, 3);
-    ctx.fill();
-    ctx.stroke();
-    ctx.fillStyle = track.solo ? '#fff' : '#999';
-    ctx.fillText('S', bx + btnW/2, btnY + 14);
+    this._drawButton(ctx, bx, btnY, btnW, btnH, 'S',
+        track.solo ? '#667eea' : '#2a2a2a',
+        track.solo ? '#667eea' : '#444',
+        track.solo ? '#fff' : '#888');
 
-    // X (Delete track)
+    // D (Duplicate)
     bx += btnW + gap;
-    ctx.fillStyle = '#333';
-    ctx.strokeStyle = '#555';
-    this._roundRect(ctx, bx, btnY, btnW, btnH, 3);
-    ctx.fill();
-    ctx.stroke();
-    ctx.fillStyle = '#888';
-    ctx.font = '12px Inter, Arial, sans-serif';
-    ctx.fillText('\u2715', bx + btnW/2, btnY + 14);
+    var hasSel = this.selectedSegment && this.selectedSegment.trackIdx === trackIdx;
+    this._drawButton(ctx, bx, btnY, btnW, btnH, 'D',
+        '#2a2a2a', hasSel ? '#667eea' : '#444', hasSel ? '#bbb' : '#555');
 
-    // D (Duplicate selected segment)
+    // X (Delete)
     bx += btnW + gap;
-    ctx.fillStyle = '#333';
-    ctx.strokeStyle = '#555';
-    this._roundRect(ctx, bx, btnY, btnW, btnH, 3);
-    ctx.fill();
-    ctx.stroke();
-    ctx.fillStyle = '#888';
-    ctx.font = 'bold 10px Inter, Arial, sans-serif';
-    ctx.fillText('D', bx + btnW/2, btnY + 14);
+    this._drawButton(ctx, bx, btnY, btnW, btnH, '\u2715',
+        '#2a2a2a', '#444', '#666');
 
-    // Volume slider visual
-    var slY = y + 54;
-    ctx.fillStyle = '#333';
-    ctx.fillRect(8, slY + 4, HEADER_WIDTH - 16, 4);
-    ctx.fillStyle = '#667eea';
-    ctx.fillRect(8, slY + 4, (HEADER_WIDTH - 16) * 0.8, 4);
-    ctx.fillStyle = '#888';
+    // Volume slider (interactive)
+    var slX = 10;
+    var slY = y + 56;
+    var slW = HEADER_WIDTH - 20;
+    var slH = 6;
+    var knobR = 7;
+    var vol = track.volume;
+
+    // Label
+    ctx.fillStyle = '#666';
     ctx.font = '9px Inter, Arial, sans-serif';
     ctx.textAlign = 'left';
-    ctx.fillText('Vol', 8, slY);
+    ctx.fillText('VOL', slX, slY - 2);
+    ctx.textAlign = 'right';
+    ctx.fillText(Math.round(vol * 100) + '%', slX + slW, slY - 2);
+
+    // Track (background)
+    ctx.fillStyle = '#2a2a2a';
+    this._roundRect(ctx, slX, slY, slW, slH, 3);
+    ctx.fill();
+
+    // Track (filled)
+    if (vol > 0) {
+        ctx.fillStyle = '#667eea';
+        this._roundRect(ctx, slX, slY, slW * vol, slH, 3);
+        ctx.fill();
+    }
+
+    // Knob
+    var knobX = slX + slW * vol;
+    ctx.fillStyle = '#fff';
+    ctx.shadowColor = 'rgba(0,0,0,0.4)';
+    ctx.shadowBlur = 3;
+    ctx.beginPath();
+    ctx.arc(knobX, slY + slH / 2, knobR, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.strokeStyle = '#555';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+};
+
+TimelineEditor.prototype._drawButton = function(ctx, x, y, w, h, label, bg, border, textColor) {
+    ctx.fillStyle = bg;
+    this._roundRect(ctx, x, y, w, h, 4);
+    ctx.fill();
+    ctx.strokeStyle = border;
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.fillStyle = textColor;
+    ctx.font = label === '\u2715' ? '13px Inter, Arial, sans-serif' : 'bold 11px Inter, Arial, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, x + w / 2, y + h / 2 + 1);
+    ctx.textBaseline = 'alphabetic';
 };
 
 TimelineEditor.prototype._roundRect = function(ctx, x, y, w, h, r) {
@@ -507,17 +580,25 @@ TimelineEditor.prototype._getSegmentAt = function(trackIdx, x) {
 
 TimelineEditor.prototype._getHeaderButtonAt = function(trackIdx, x, y) {
     var ty = RULER_HEIGHT + trackIdx * TRACK_HEIGHT;
-    var btnY = ty + 26;
-    var btnW = 24, btnH = 20, gap = 4;
-    if (y < btnY || y > btnY + btnH) return null;
-    var bx = 8;
-    if (x >= bx && x <= bx + btnW) return 'mute';
-    bx += btnW + gap;
-    if (x >= bx && x <= bx + btnW) return 'solo';
-    bx += btnW + gap;
-    if (x >= bx && x <= bx + btnW) return 'delete';
-    bx += btnW + gap;
-    if (x >= bx && x <= bx + btnW) return 'duplicate';
+    var btnY = ty + 24;
+    var btnW = 26, btnH = 22, gap = 5;
+    if (y >= btnY && y <= btnY + btnH) {
+        var bx = 10;
+        if (x >= bx && x <= bx + btnW) return 'mute';
+        bx += btnW + gap;
+        if (x >= bx && x <= bx + btnW) return 'solo';
+        bx += btnW + gap;
+        if (x >= bx && x <= bx + btnW) return 'duplicate';
+        bx += btnW + gap;
+        if (x >= bx && x <= bx + btnW) return 'delete';
+    }
+    // Volume slider area
+    var slY = ty + 56;
+    var slH = 6;
+    var knobR = 7;
+    if (y >= slY - knobR && y <= slY + slH + knobR && x >= 10 && x <= HEADER_WIDTH - 10) {
+        return 'volume';
+    }
     return null;
 };
 
@@ -548,6 +629,12 @@ TimelineEditor.prototype._onMouseDown = function(e) {
             if (this.selectedSegment && this.selectedSegment.trackIdx === trackIdx) {
                 this.duplicateSegment(trackIdx, this.selectedSegment.segIdx);
             }
+        } else if (btn === 'volume') {
+            this.dragMode = 'volume';
+            this._volumeTrackIdx = trackIdx;
+            var slX = 10, slW = HEADER_WIDTH - 20;
+            var vol = Math.max(0, Math.min(1, (mx - slX) / slW));
+            this.tracks[trackIdx].volume = vol;
         }
         this._render();
         return;
@@ -563,10 +650,10 @@ TimelineEditor.prototype._onMouseDown = function(e) {
             var effectiveDur = seg.duration - seg.trimStart - seg.trimEnd;
             var segEndX = segX + effectiveDur * this.pixelsPerSec;
 
-            // Check resize handles (8px from edges)
-            if (mx - segX < 8) {
+            // Check resize handles
+            if (mx - segX < RESIZE_ZONE) {
                 this.dragMode = 'resize-left';
-            } else if (segEndX - mx < 8) {
+            } else if (segEndX - mx < RESIZE_ZONE) {
                 this.dragMode = 'resize-right';
             } else {
                 this.dragMode = 'move';
@@ -589,9 +676,17 @@ TimelineEditor.prototype._onMouseMove = function(e) {
     var mx = e.clientX - rect.left;
     var my = e.clientY - rect.top;
 
-    // Cursor style
+    // Volume slider drag
+    if (this.dragMode === 'volume' && this._volumeTrackIdx !== undefined) {
+        var slX = 10, slW = HEADER_WIDTH - 20;
+        var vol = Math.max(0, Math.min(1, (mx - slX) / slW));
+        this.tracks[this._volumeTrackIdx].volume = vol;
+        this._render();
+        return;
+    }
+
+    // Segment drag
     if (this.selectedSegment && this.dragMode) {
-        // Dragging
         var seg = this.tracks[this.selectedSegment.trackIdx].segments[this.selectedSegment.segIdx];
         var dx = mx - this.dragStartX;
         var dt = dx / this.pixelsPerSec;
@@ -599,15 +694,18 @@ TimelineEditor.prototype._onMouseMove = function(e) {
         if (this.dragMode === 'move') {
             seg.start = Math.max(0, this.dragOrigStart + dt);
         } else if (this.dragMode === 'resize-left') {
-            var newTrim = Math.max(0, this.dragOrigTrimStart + dt / this.pixelsPerSec * 1);
-            // Recalculate: trim changes, start changes
+            // dt > 0 means mouse moved right = more trim from start
+            var newTrim = this.dragOrigTrimStart + dt;
+            newTrim = Math.max(0, newTrim);
             var maxTrim = seg.duration - seg.trimEnd - 0.05;
             newTrim = Math.min(newTrim, maxTrim);
-            var trimDelta = newTrim - this.dragOrigTrimStart;
             seg.trimStart = newTrim;
-            seg.start = this.dragOrigStart + trimDelta;
+            // Move start so the right edge stays in place
+            seg.start = this.dragOrigStart + (newTrim - this.dragOrigTrimStart);
         } else if (this.dragMode === 'resize-right') {
-            var newTrimEnd = Math.max(0, this.dragOrigTrimEnd - dt / this.pixelsPerSec * 1);
+            // dt > 0 means mouse moved right = less trim from end
+            var newTrimEnd = this.dragOrigTrimEnd - dt;
+            newTrimEnd = Math.max(0, newTrimEnd);
             var maxTrimEnd = seg.duration - seg.trimStart - 0.05;
             newTrimEnd = Math.min(newTrimEnd, maxTrimEnd);
             seg.trimEnd = newTrimEnd;
@@ -626,7 +724,7 @@ TimelineEditor.prototype._onMouseMove = function(e) {
             var segX = this._timeToX(seg.start);
             var effectiveDur = seg.duration - seg.trimStart - seg.trimEnd;
             var segEndX = segX + effectiveDur * this.pixelsPerSec;
-            if (mx - segX < 8 || segEndX - mx < 8) {
+            if (mx - segX < RESIZE_ZONE || segEndX - mx < RESIZE_ZONE) {
                 this.canvas.style.cursor = 'ew-resize';
             } else {
                 this.canvas.style.cursor = 'grab';
@@ -644,6 +742,7 @@ TimelineEditor.prototype._onMouseMove = function(e) {
 TimelineEditor.prototype._onMouseUp = function(e) {
     if (this.dragMode) {
         this.dragMode = null;
+        this._volumeTrackIdx = undefined;
         this.canvas.style.cursor = 'default';
     }
 };
@@ -691,18 +790,21 @@ TimelineEditor.prototype.play = function() {
         if (track.muted) continue;
         if (hasSolo && !track.solo) continue;
 
+        var trackVol = track.volume !== undefined ? track.volume : 0.8;
         for (var s = 0; s < track.segments.length; s++) {
             var seg = track.segments[s];
             var effectiveDur = seg.duration - seg.trimStart - seg.trimEnd;
             var offset = seg.start - this.playhead;
             var src = this.audioCtx.createBufferSource();
             src.buffer = seg.buffer;
-            src.connect(this.audioCtx.destination);
+            var gain = this.audioCtx.createGain();
+            gain.gain.value = trackVol;
+            src.connect(gain);
+            gain.connect(this.audioCtx.destination);
 
             if (offset >= 0) {
                 src.start(this.audioCtx.currentTime + offset, seg.trimStart, effectiveDur);
             } else if (offset + effectiveDur > 0) {
-                // Playhead is inside this segment
                 var skipTime = -offset;
                 src.start(this.audioCtx.currentTime, seg.trimStart + skipTime, effectiveDur - skipTime);
             }
