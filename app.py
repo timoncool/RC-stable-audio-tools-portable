@@ -286,7 +286,7 @@ def prepare_editor_data(clips):
 
 
 # ============================================================
-# JS для инициализации waveform-playlist в редакторе
+# JS для кастомного таймлайн-редактора
 # ============================================================
 EDITOR_INIT_JS = """
 (clipsJson) => {
@@ -295,136 +295,40 @@ EDITOR_INIT_JS = """
 
     const container = document.getElementById('wp-container');
     if (!container) { return; }
+
+    // Уничтожаем старый редактор
+    if (window._timeline) {
+        try { window._timeline.stop(); window._timeline.destroy(); } catch(e) {}
+    }
     container.innerHTML = '';
 
-    if (window._wpEE) {
-        try { window._wpEE.emit('stop'); } catch(e) {}
-    }
+    var editor = new TimelineEditor(container);
+    window._timeline = editor;
 
-    var initOpts = {
-        samplesPerPixel: 1000,
-        waveHeight: 80,
-        container: container,
-        timescale: true,
-        state: 'cursor',
-        isAutomaticScroll: true,
-        colors: {
-            waveOutlineColor: '#2a2a2a',
-            timeColor: '#ccc',
-            fadeColor: 'rgba(102, 126, 234, 0.5)',
-        },
-        controls: {
-            show: true,
-            width: 200,
-        },
-        zoomLevels: [500, 1000, 3000, 5000],
-    };
-    const playlist = WaveformPlaylist.init(initOpts);
-
-    playlist.load(clips.map(function(c) {
-        return { src: c.url, name: c.name, start: 0 };
-    })).then(function() {
-        // Инициализация WAV-экспорта (не вызывается автоматически в v4.3.3)
-        if (typeof playlist.initExporter === 'function') {
-            playlist.initExporter();
-        }
-        var ee = playlist.getEventEmitter();
-        window._wpEE = ee;
-        window._wpPlaylist = playlist;
-        var isLooping = false, selStart = 0, selEnd = 0;
-
-        var bar = document.getElementById('wp-toolbar');
-        bar.querySelector('.wp-play').onclick = function() { ee.emit('play'); };
-        bar.querySelector('.wp-pause').onclick = function() {
-            isLooping = false;
-            bar.querySelector('.wp-loop').classList.remove('wp-active');
-            ee.emit('pause');
-        };
-        bar.querySelector('.wp-stop').onclick = function() {
-            isLooping = false;
-            bar.querySelector('.wp-loop').classList.remove('wp-active');
-            ee.emit('stop');
-        };
-        bar.querySelector('.wp-loop').onclick = function() {
-            isLooping = !isLooping;
-            this.classList.toggle('wp-active', isLooping);
-            if (isLooping) {
-                ee.emit('play');
-            }
-        };
-        bar.querySelector('.wp-export').onclick = function() {
-            ee.emit('startaudiorendering', 'wav');
-        };
-        bar.querySelector('.wp-zoomin').onclick = function() { ee.emit('zoomin'); };
-        bar.querySelector('.wp-zoomout').onclick = function() { ee.emit('zoomout'); };
-
-        function setMode(mode, el) {
-            ee.emit('statechange', mode);
-            bar.querySelectorAll('.wp-cursor,.wp-shift,.wp-select').forEach(function(b) { b.classList.remove('wp-active'); });
-            el.classList.add('wp-active');
-        }
-        bar.querySelector('.wp-cursor').onclick = function() { setMode('cursor', this); };
-        bar.querySelector('.wp-shift').onclick = function() { setMode('shift', this); };
-        bar.querySelector('.wp-select').onclick = function() { setMode('select', this); };
-
-        ee.on('select', function(s, e) { selStart = s; selEnd = e; });
-        ee.on('finished', function() {
-            if (isLooping) {
-                setTimeout(function() {
-                    if (isLooping) {
-                        if (selStart < selEnd) {
-                            ee.emit('play', selStart, selEnd);
-                        } else {
-                            ee.emit('play');
-                        }
-                    }
-                }, 50);
-            }
-        });
-        ee.on('audiorenderingfinished', function(type, data) {
-            if (type === 'wav') {
-                var a = document.createElement('a');
-                a.href = URL.createObjectURL(data);
-                a.download = 'mix.wav';
-                a.click();
-            }
-        });
-
-        // Кастомизация контролов: M/S/корзина/дубликат
-        container.querySelectorAll('.btn-mute').forEach(function(b) { b.textContent = 'M'; b.title = 'Mute'; });
-        container.querySelectorAll('.btn-solo').forEach(function(b) { b.textContent = 'S'; b.title = 'Solo'; });
-        container.querySelectorAll('.btn-danger').forEach(function(b) {
-            b.innerHTML = '&#x2715;';
-            b.title = 'Удалить';
-        });
-
-        // Добавляем кнопку дублирования на каждый трек
-        container.querySelectorAll('.controls').forEach(function(ctrl, idx) {
-            var btnGroup = ctrl.querySelector('.btn-group');
-            if (btnGroup && !btnGroup.querySelector('.btn-duplicate')) {
-                var dupBtn = document.createElement('button');
-                dupBtn.className = 'btn btn-duplicate';
-                dupBtn.innerHTML = '&#x2398;';
-                dupBtn.title = 'Дублировать';
-                dupBtn.onclick = function() {
-                    // Получаем данные трека и дублируем
-                    var tracks = playlist.tracks;
-                    if (tracks && tracks[idx]) {
-                        var track = tracks[idx];
-                        var src = track.src || track.buffer;
-                        var name = track.name ? track.name + ' (copy)' : 'Copy';
-                        var startTime = (track.startTime || 0) + (track.endTime - track.startTime || 2);
-                        var loadData = [{ src: src, name: name, start: startTime }];
-                        if (track.buffer) {
-                            // Use AudioBuffer directly
-                            ee.emit('newtrack', track.buffer);
-                        }
-                    }
-                };
-                btnGroup.appendChild(dupBtn);
-            }
-        });
+    // Загрузка клипов — каждый на свой трек
+    var loadPromises = clips.map(function(c, i) {
+        return editor.loadClip(c.url, c.name, i, 0);
     });
+
+    Promise.all(loadPromises).then(function() {
+        console.log('[EDITOR] Loaded ' + clips.length + ' clips');
+    }).catch(function(err) {
+        console.error('[EDITOR] Load error:', err);
+    });
+
+    // Привязка тулбара
+    var bar = document.getElementById('wp-toolbar');
+    bar.querySelector('.wp-play').onclick = function() { editor.play(); };
+    bar.querySelector('.wp-pause').onclick = function() { editor.pause(); };
+    bar.querySelector('.wp-stop').onclick = function() { editor.stop(); };
+    bar.querySelector('.wp-loop').onclick = function() {
+        var on = editor.toggleLoop();
+        this.classList.toggle('wp-active', on);
+        if (on && !editor.isPlaying) editor.play();
+    };
+    bar.querySelector('.wp-zoomin').onclick = function() { editor.zoomIn(); };
+    bar.querySelector('.wp-zoomout').onclick = function() { editor.zoomOut(); };
+    bar.querySelector('.wp-export').onclick = function() { editor.exportWAV(); };
 }
 """
 
@@ -491,95 +395,9 @@ def build_ui():
     }
     #wp-container {
         min-height: 400px;
-        background: #1a1a1a;
+        background: #141414;
         border-radius: 8px;
         overflow: hidden;
-    }
-    #wp-container .playlist .controls {
-        background: #1a1a1a !important;
-        color: #ccc !important;
-        border-color: #333 !important;
-    }
-    #wp-container .playlist .controls .track-header {
-        color: #e0e0e0 !important;
-        font-size: 0.8rem;
-    }
-    #wp-container .playlist .controls .btn-mute,
-    #wp-container .playlist .controls .btn-solo {
-        width: 28px !important;
-        height: 22px !important;
-        padding: 0 !important;
-        font-size: 0.75rem !important;
-        font-weight: 700 !important;
-        border-radius: 3px !important;
-        line-height: 22px !important;
-        text-align: center !important;
-    }
-    #wp-container .playlist .controls .btn-mute {
-        background: transparent !important;
-        border: 1px solid #555 !important;
-        color: #999 !important;
-    }
-    #wp-container .playlist .controls .btn-mute:hover,
-    #wp-container .playlist .controls .btn-mute.active {
-        background: #e04050 !important;
-        border-color: #e04050 !important;
-        color: #fff !important;
-    }
-    #wp-container .playlist .controls .btn-solo {
-        background: transparent !important;
-        border: 1px solid #555 !important;
-        color: #999 !important;
-    }
-    #wp-container .playlist .controls .btn-solo:hover,
-    #wp-container .playlist .controls .btn-solo.active {
-        background: #667eea !important;
-        border-color: #667eea !important;
-        color: #fff !important;
-    }
-    #wp-container .playlist .controls .btn-danger {
-        width: 24px !important;
-        height: 22px !important;
-        padding: 0 !important;
-        font-size: 0.8rem !important;
-        border-radius: 3px !important;
-        background: transparent !important;
-        border: 1px solid #555 !important;
-        color: #888 !important;
-    }
-    #wp-container .playlist .controls .btn-danger:hover {
-        background: #e04050 !important;
-        border-color: #e04050 !important;
-        color: #fff !important;
-    }
-    #wp-container .playlist .controls .btn-duplicate {
-        width: 24px;
-        height: 22px;
-        padding: 0;
-        font-size: 0.8rem;
-        font-weight: 700;
-        border-radius: 3px;
-        background: transparent;
-        border: 1px solid #555;
-        color: #888;
-        cursor: pointer;
-        margin-left: 2px;
-    }
-    #wp-container .playlist .controls .btn-duplicate:hover {
-        background: #667eea;
-        border-color: #667eea;
-        color: #fff;
-    }
-    #wp-container .playlist .controls .btn-group {
-        gap: 3px;
-        display: flex;
-        align-items: center;
-    }
-    #wp-container .playlist .controls input[type="range"] {
-        width: 80% !important;
-    }
-    #wp-container .playlist .playlist-time-scale {
-        background: #141414;
     }
     """
 
@@ -602,8 +420,7 @@ def build_ui():
     editor_dir = os.path.join(SCRIPT_DIR, "editor")
     editor_rel = os.path.relpath(editor_dir, SCRIPT_DIR).replace("\\", "/")
     head = f"""
-    <link rel="stylesheet" href="/gradio_api/file={editor_rel}/playlist.css">
-    <script src="/gradio_api/file={editor_rel}/waveform-playlist.var.min.js"></script>
+    <script src="/gradio_api/file={editor_rel}/timeline.js"></script>
     """
 
     with gr.Blocks(theme=theme, css=css, title=APP_NAME, js=js, head=head) as app:
@@ -747,11 +564,13 @@ def build_ui():
                         clear_editor_btn = gr.Button("Очистить редактор")
                         gr.Markdown("""---
 ### Управление
-- **Курсор** -- прослушивание с точки
-- **Сдвиг** -- перетаскивание клипов
-- **Выделить** -- выделение области
-- **Цикл** -- зациклить выделение (сначала выделите область)
-- **Экспорт** -- скачать микс в WAV
+- **Перетаскивание** -- двигайте сегменты мышью
+- **Края сегмента** -- тяните за край для обрезки
+- **Клик по линейке** -- переместить плейхед
+- **Колесо мыши** -- прокрутка, Ctrl+колесо -- зум
+- **M** -- заглушить трек, **S** -- соло
+- **D** -- дублировать выбранный сегмент
+- **X** -- удалить трек
 """)
                     with gr.Column(scale=4):
                         editor_html = gr.HTML("""
@@ -760,9 +579,6 @@ def build_ui():
     <button class="wp-pause">Пауза</button>
     <button class="wp-stop">Стоп</button>
     <button class="wp-loop">Цикл</button>
-    <button class="wp-cursor wp-active">Курсор</button>
-    <button class="wp-shift">Сдвиг</button>
-    <button class="wp-select">Выделить</button>
     <button class="wp-zoomin">Zoom +</button>
     <button class="wp-zoomout">Zoom -</button>
     <button class="wp-export">Экспорт WAV</button>
