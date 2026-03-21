@@ -113,7 +113,6 @@ RC-stable-audio-tools-portable/
 | [LavaSR](https://github.com/timoncool/LavaSR_portable_ru) | Улучшение качества аудио |
 | [Qwen3-TTS](https://github.com/timoncool/Qwen3-TTS_portable_rus) | Синтез речи (TTS) от Qwen |
 | [SuperCaption Qwen3-VL](https://github.com/timoncool/SuperCaption_Qwen3-VL) | Генерация описаний изображений |
-| [Wan2GP](https://github.com/timoncool/Wan2GP_wan.best) | AI-генерация видео (Wan 2.1/2.2, Hunyuan, LTX) |
 | [VideoSOS](https://github.com/timoncool/videosos) | AI-видеопродакшн в браузере |
 
 ## Авторы
