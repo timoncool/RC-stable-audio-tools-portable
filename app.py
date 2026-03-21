@@ -3,7 +3,7 @@ RC Stable Audio Tools -- Portable RU
 Генерация музыки и аудио по текстовому описанию
 
 Авторы:
-@Nerual Dreaming - портативная версия, русификация
+@Nerual Dreming - портативная версия, русификация
 Нейро-Софт (t.me/neuroport) - репаки и портативки полезных нейросетей
 Оригинал: RoyalCities/RC-stable-audio-tools
 Модель: Stable Audio (Stability AI)
@@ -102,6 +102,7 @@ from stable_audio_tools.interface.gradio import (
 
 APP_NAME = "RC Stable Audio Tools"
 APP_VERSION = "1.0"
+DEFAULT_MODEL = "RoyalCities/Foundation-1"
 
 # Доступные модели для скачивания
 HF_MODELS = [
@@ -110,6 +111,40 @@ HF_MODELS = [
     "cocktailpeanut/stable-audio-open-1.0",
     "RoyalCities/Vocal_Textures_Main",
     "adlb/Audialab_EDM_Elements",
+]
+
+# Примеры промптов
+EXAMPLE_PROMPTS = [
+    "Synth Bass, Analog, Warm, Rich, Deep, Fat, Simple, Bassline",
+    "Synth Lead, 303, Acid, Gritty, Arp, Fast Speed, Medium Reverb, Low Distortion",
+    "Pad, Atmosphere, Dreamy, Wide, Soft, Warm, Silky, Sustained, Chord Progression",
+    "Grand Piano, Bright, Clean, Rich, Chord Progression, Simple, Medium Reverb",
+    "Violin, Bowed Strings, Intimate, Warm, Breathy, Melody, Rising, Slow Speed, High Reverb",
+    "FM Bass, Sub Bass, Deep, Punchy, Crisp, Digital, Thick, Bassline, Choppy",
+    "Kalimba, Mallet, Sparkly, Bright, Airy, Wide, Alternating, Arp, Medium Reverb",
+    "Rhodes Piano, Warm, Smooth, Vintage, Round, Chord Progression, Low Reverb",
+    "Supersaw, Synth Lead, Wide, Fat, Bright, Silky, Melody, Epic, High Reverb, Stereo Delay",
+    "Acoustic Guitar, Warm, Woody, Intimate, Strummed, Chord Progression, Simple",
+    "Choir, Formant Vocal, Dreamy, Wide, Spacey, Sustained, Dark, High Reverb, Ping Pong Delay",
+    "Wavetable Bass, Acid, Overdriven, Gritty, Thick, Pitch Bend, Complex, Bassline, Low Distortion, Phaser",
+    "Flute, Airy, Breathy, Soft, Melody, Catchy, Slow Speed, Medium Reverb",
+    "Cello, Bowed Strings, Rich, Deep, Warm, Sustained, Melody, Rising, Low Reverb",
+    "Harp, Plucked, Glassy, Bright, Shiny, Arp, Complex, Fast Speed, High Reverb",
+    "Marimba, Mallet, Warm, Woody, Round, Punchy, Arp, Alternating, Low Delay",
+    "Synth Lead, Wavetable Synth, Metallic, Crisp, Digital, Glassy, Top Melody, Fast Speed, Medium Delay",
+    "Reese Bass, Sub Bass, Dark, Thick, Wide, Growl, Overdriven, Bassline, Phaser",
+    "Hammond Organ, Vintage, Warm, Rich, Full, Chord Progression, Sustained, Low Distortion",
+    "Music Box, Celesta, Glassy, Sparkly, Soft, Intimate, Melody, Simple, Slow Speed, High Reverb",
+    "Trumpet, Brass, Smooth, Warm, Silky, Melody, Epic, Medium Reverb, Low Distortion",
+    "Pluck, Synth, Crisp, Punchy, Bright, Digital, Arp, Rolling, Fast Speed, Ping Pong Delay",
+    "Vibraphone, Mallet, Shiny, Warm, Spacey, Dreamy, Chord Progression, Medium Reverb, Stereo Delay",
+    "FM Synth, Bell, Glassy, Metallic, Bright, Crisp, Arp, Complex, Medium Delay",
+    "Electric Bass, Punchy, Clean, Focused, Tight, Bassline, Simple, Dry",
+    "Fiddle, Bowed Strings, Intimate, Rich, Clean, Rolling, Arp, Fast Speed, Complex",
+    "Synth Lead, Chiptune, Pulse Wave, Bitcrushed, Retro, Square, Melody, Catchy",
+    "Pan Flute, Airy, Soft, Wide, Ambient, Spacey, Sustained, Melody, Slow Speed, High Reverb, Plate Reverb",
+    "Glockenspiel, Mallet, Bright, Sparkly, Small, Crisp, Arp, Alternating, Medium Reverb",
+    "Sub Bass, Wavetable Bass, Dark, Deep, Fat, Thick, Rumble, Sustained, Bassline, Low Phaser",
 ]
 
 
@@ -134,7 +169,6 @@ def download_hf_model(model_id, progress=gr.Progress()):
         )
         progress(1, desc="Готово!")
 
-        # Обновляем список моделей
         names, _ = scan_local_models()
         return (
             f"Модель {model_id} скачана!",
@@ -189,6 +223,11 @@ def do_generate(prompt, negative_prompt, bars, bpm, note, scale,
     if current_model is None:
         return None, [], None, None, "Сначала загрузите модель!"
 
+    # Убираем переводы строк из промпта — иначе они попадут в имя файла
+    prompt = " ".join(prompt.split())
+    if negative_prompt:
+        negative_prompt = " ".join(negative_prompt.split())
+
     try:
         result = generate_cond(
             prompt=prompt,
@@ -216,22 +255,9 @@ def do_generate(prompt, negative_prompt, bars, bpm, note, scale,
 
 
 def random_prompt():
-    """Случайный промпт из генератора библиотеки."""
-    from stable_audio_tools.interface.gradio import current_prompt_generator
-    try:
-        return current_prompt_generator()
-    except Exception:
-        prompts = [
-            "ambient electronic music with soft pads and reverb",
-            "energetic drum and bass with heavy bassline",
-            "calm piano melody with strings accompaniment",
-            "lo-fi hip hop beat with vinyl crackle",
-            "epic orchestral soundtrack with brass and percussion",
-            "smooth jazz with saxophone solo",
-            "dark techno with industrial synths",
-        ]
-        import random
-        return random.choice(prompts)
+    """Случайный промпт из списка примеров."""
+    import random
+    return random.choice(EXAMPLE_PROMPTS)
 
 
 def build_ui():
@@ -279,7 +305,6 @@ def build_ui():
         secondary_hue="purple",
     )
 
-    # Темная тема по умолчанию
     js = """
     () => {
         const url = new URL(window.location);
@@ -292,19 +317,12 @@ def build_ui():
 
     with gr.Blocks(theme=theme, css=css, title=APP_NAME, js=js) as app:
 
-        # Заголовок с кредитами
-        gr.HTML(f"""
-        <div class="main-header">
-            <h1>{APP_NAME} v{APP_VERSION}</h1>
-            <p>Генерация музыки и аудио по текстовому описанию</p>
-            <p style="font-size: 0.85rem; opacity: 0.9; margin-top: 0.5rem;">
-                Собрал <a href="https://t.me/nerual_dreming" target="_blank">Nerual Dreaming</a> — основатель <a href="https://artgeneration.me/" target="_blank">ArtGeneration.me</a>, техноблогер и нейро-евангелист.
-            </p>
-            <p style="font-size: 0.85rem; opacity: 0.9; margin-top: 0.3rem;">
-                <a href="https://t.me/neuroport" target="_blank">Нейро-Софт</a> — репаки и портативки полезных нейросетей
-            </p>
-        </div>
-        """)
+        gr.HTML(f"""<div class="main-header">
+<h1>{APP_NAME} v{APP_VERSION}</h1>
+<p>Генерация музыки и аудио по текстовому описанию</p>
+<p style="font-size:0.85rem; opacity:0.9; margin-top:0.5rem;">Собрал <a href="https://t.me/nerual_dreming" target="_blank">Nerual Dreming</a> — основатель <a href="https://artgeneration.me/" target="_blank">ArtGeneration.me</a>, техноблогер и нейро-евангелист.</p>
+<p style="font-size:0.85rem; opacity:0.9; margin-top:0.3rem;"><a href="https://t.me/neuroport" target="_blank">Нейро-Софт</a> — репаки и портативки полезных нейросетей</p>
+</div>""")
 
         with gr.Tabs():
             # ==========================================
@@ -314,21 +332,11 @@ def build_ui():
                 with gr.Row():
                     # Колонка 1: Управление
                     with gr.Column(scale=1):
-                        model_status = gr.Textbox(
-                            label="Статус модели",
-                            value="Модель не загружена",
-                            interactive=False,
-                        )
-
-                        names, _ = scan_local_models()
-                        model_dropdown = gr.Dropdown(
-                            label="Выберите модель",
-                            choices=names,
-                            value=names[0] if names else None,
-                        )
-                        load_btn = gr.Button("Загрузить модель", variant="primary")
-
-                        gr.Markdown("---")
+                        with gr.Row():
+                            bars = gr.Dropdown(label="Такты", choices=[4, 8], value=4)
+                            bpm = gr.Dropdown(label="BPM", choices=list(range(60, 201, 5)), value=120)
+                            note = gr.Dropdown(label="Тональность", choices=["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"], value="C")
+                            scale_type = gr.Dropdown(label="Лад", choices=["major", "minor"], value="major")
 
                         prompt = gr.Textbox(
                             label="Промпт",
@@ -347,43 +355,36 @@ def build_ui():
 
                         gr.Markdown("---")
 
-                        with gr.Row():
-                            bars = gr.Dropdown(
-                                label="Такты",
-                                choices=[4, 8],
-                                value=4,
-                            )
-                            bpm = gr.Dropdown(
-                                label="BPM",
-                                choices=list(range(60, 201, 5)),
-                                value=120,
-                            )
+                        import stable_audio_tools.interface.gradio as _sat
+                        names, _ = scan_local_models()
+                        _model_loaded = _sat.model is not None
+                        _default = next((n for n in names if "Foundation" in n), names[0] if names else None)
+                        model_status = gr.Textbox(
+                            label="Статус модели",
+                            value=f"Модель загружена ({_default})" if _model_loaded and _default else "Модель не загружена",
+                            interactive=False,
+                        )
+                        model_dropdown = gr.Dropdown(
+                            label="Выберите модель",
+                            choices=names,
+                            value=_default,
+                        )
+                        load_btn = gr.Button("Загрузить модель", variant="primary")
 
-                        with gr.Row():
-                            note = gr.Dropdown(
-                                label="Тональность",
-                                choices=["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"],
-                                value="C",
-                            )
-                            scale_type = gr.Dropdown(
-                                label="Лад",
-                                choices=["major", "minor"],
-                                value="major",
-                            )
-
-                        seed = gr.Number(label="Сид (-1 для случайного)", value=-1, precision=0)
-
-                        with gr.Accordion("Параметры сэмплера", open=False):
-                            steps = gr.Slider(label="Шаги", minimum=1, maximum=500, value=75, step=1)
-                            cfg_scale = gr.Slider(label="CFG масштаб", minimum=0, maximum=25, value=7.0, step=0.1)
+                        with gr.Accordion("Параметры генерации", open=False):
+                            seed = gr.Number(label="Сид (-1 = случайный)", value=-1, precision=0)
                             sampler_type = gr.Dropdown(
                                 label="Сэмплер",
                                 choices=["dpmpp-3m-sde", "dpmpp-2m-sde", "k-heun", "k-lms",
                                          "k-dpmpp-2s-ancestral", "k-dpm-2", "k-dpm-fast"],
                                 value="dpmpp-3m-sde",
                             )
-                            sigma_min = gr.Slider(label="Sigma min", minimum=0, maximum=2, value=0.03, step=0.01)
-                            sigma_max = gr.Slider(label="Sigma max", minimum=0, maximum=1000, value=500, step=1)
+                            with gr.Row():
+                                steps = gr.Slider(label="Шаги", minimum=1, maximum=500, value=250, step=1)
+                                cfg_scale = gr.Slider(label="CFG масштаб", minimum=0, maximum=25, value=7.0, step=0.1)
+                            with gr.Row():
+                                sigma_min = gr.Slider(label="Sigma min", minimum=0, maximum=2, value=0.03, step=0.01)
+                                sigma_max = gr.Slider(label="Sigma max", minimum=0, maximum=1000, value=500, step=1)
                             cfg_rescale = gr.Slider(label="CFG rescale", minimum=0, maximum=1, value=0, step=0.01)
 
                         with gr.Accordion("AI Стилизация", open=False):
@@ -394,9 +395,19 @@ def build_ui():
                                 minimum=0, maximum=1, value=0.7, step=0.01,
                             )
 
+                        gr.Markdown("---")
+
+                        gr.Markdown("### Примеры промптов")
+                        gr.Examples(
+                            examples=[[p] for p in EXAMPLE_PROMPTS],
+                            inputs=[prompt],
+                            label="",
+                        )
+
                     # Колонка 2: Результат
                     with gr.Column(scale=1):
-                        output_audio = gr.Audio(label="Результат", type="filepath")
+                        autoplay = gr.Checkbox(label="Автовоспроизведение", value=True)
+                        output_audio = gr.Audio(label="Результат", type="filepath", autoplay=True)
                         gen_status = gr.Textbox(label="Статус", interactive=False)
                         spectrograms = gr.Gallery(label="Спектрограмма", columns=1, height=300)
                         piano_roll = gr.Image(label="MIDI пианоролл")
@@ -444,12 +455,26 @@ def build_ui():
             outputs=[prompt],
         )
 
+        def do_generate_wrap(prompt_val, negative_prompt_val, bars_val, bpm_val,
+                             note_val, scale_val, cfg_scale_val, steps_val, seed_val,
+                             sampler_type_val, sigma_min_val, sigma_max_val,
+                             cfg_rescale_val, use_init_val, init_audio_val,
+                             init_noise_level_val, autoplay_val):
+            file_path, specs, pr, midi, status = do_generate(
+                prompt_val, negative_prompt_val, bars_val, bpm_val,
+                note_val, scale_val, cfg_scale_val, steps_val, seed_val,
+                sampler_type_val, sigma_min_val, sigma_max_val,
+                cfg_rescale_val, use_init_val, init_audio_val, init_noise_level_val,
+            )
+            audio_out = gr.Audio(value=file_path, autoplay=autoplay_val)
+            return audio_out, specs, pr, midi, status
+
         generate_btn.click(
-            fn=do_generate,
+            fn=do_generate_wrap,
             inputs=[
                 prompt, negative_prompt, bars, bpm, note, scale_type,
                 cfg_scale, steps, seed, sampler_type, sigma_min, sigma_max,
-                cfg_rescale, use_init, init_audio, init_noise_level,
+                cfg_rescale, use_init, init_audio, init_noise_level, autoplay,
             ],
             outputs=[output_audio, spectrograms, piano_roll, midi_file, gen_status],
         )
@@ -467,6 +492,31 @@ def build_ui():
     return app
 
 
+def ensure_and_load_model():
+    """Скачивает модель по умолчанию если нет ни одной, загружает первую найденную."""
+    names, _ = scan_local_models()
+    if not names:
+        print(f"  Моделей не найдено. Скачивание {DEFAULT_MODEL}...")
+        try:
+            snapshot_download(
+                repo_id=DEFAULT_MODEL,
+                local_dir=os.path.join(MODELS_DIR, DEFAULT_MODEL.replace("/", "_")),
+                local_dir_use_symlinks=False,
+            )
+            print(f"  Модель {DEFAULT_MODEL} скачана!")
+        except Exception as e:
+            print(f"  Ошибка скачивания: {e}")
+            return
+        names, _ = scan_local_models()
+
+    if names:
+        # Ищем Foundation_1 (модель по умолчанию), иначе берём первую
+        target = next((n for n in names if "Foundation" in n), names[0])
+        print(f"  Загрузка модели: {target}...")
+        result = do_load_model(target)
+        print(f"  {result}")
+
+
 def main():
     torch.manual_seed(42)
 
@@ -477,6 +527,9 @@ def main():
     print()
     print(f"  Модели:     {MODELS_DIR}")
     print(f"  Генерации:  {GENERATIONS_DIR}")
+    print()
+
+    ensure_and_load_model()
     print()
 
     app = build_ui()
