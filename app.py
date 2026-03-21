@@ -260,6 +260,138 @@ def random_prompt():
     return random.choice(EXAMPLE_PROMPTS)
 
 
+def add_to_editor(file_path, clips):
+    """Добавляет сгенерированный файл в редактор."""
+    if not file_path or not os.path.exists(str(file_path)):
+        return clips, "Клипов в редакторе: " + str(len(clips)), "Нет файла для добавления"
+
+    file_path = str(file_path)
+    name = os.path.basename(file_path).rsplit(".", 1)[0][:50]
+    clips = clips + [{"path": file_path, "name": name}]
+    return clips, "Клипов в редакторе: " + str(len(clips)), "Добавлен: " + name
+
+
+def prepare_editor_data(clips):
+    """Подготавливает JSON с клипами для JS плеера."""
+    data = []
+    for clip in clips:
+        path = clip["path"]
+        if os.path.isfile(path):
+            # Относительный путь от CWD (SCRIPT_DIR) — обходит проблему F:/ в URL
+            rel = os.path.relpath(path, SCRIPT_DIR).replace("\\", "/")
+            data.append({"url": "/gradio_api/file=" + rel, "name": clip["name"]})
+        else:
+            print(f"  [SKIP] {path}: file not found")
+    return json.dumps(data)
+
+
+# ============================================================
+# JS для инициализации waveform-playlist в редакторе
+# ============================================================
+EDITOR_INIT_JS = """
+(clipsJson) => {
+    const clips = JSON.parse(clipsJson);
+    if (!clips || !clips.length) { return; }
+
+    const container = document.getElementById('wp-container');
+    if (!container) { return; }
+    container.innerHTML = '';
+
+    if (window._wpEE) {
+        try { window._wpEE.emit('stop'); } catch(e) {}
+    }
+
+    var initOpts = {
+        samplesPerPixel: 1000,
+        waveHeight: 80,
+        container: container,
+        timescale: true,
+        state: 'cursor',
+        isAutomaticScroll: true,
+        colors: {
+            waveOutlineColor: '#2a2a2a',
+            timeColor: '#ccc',
+            fadeColor: 'rgba(102, 126, 234, 0.5)',
+        },
+        controls: {
+            show: true,
+            width: 200,
+        },
+        zoomLevels: [500, 1000, 3000, 5000],
+    };
+    const playlist = WaveformPlaylist.init(initOpts);
+
+    playlist.load(clips.map(function(c) {
+        return { src: c.url, name: c.name, start: 0 };
+    })).then(function() {
+        // Инициализация WAV-экспорта (не вызывается автоматически в v4.3.3)
+        if (typeof playlist.initExporter === 'function') {
+            playlist.initExporter();
+        }
+        var ee = playlist.getEventEmitter();
+        window._wpEE = ee;
+        window._wpPlaylist = playlist;
+        var isLooping = false, selStart = 0, selEnd = 0;
+
+        var bar = document.getElementById('wp-toolbar');
+        bar.querySelector('.wp-play').onclick = function() { ee.emit('play'); };
+        bar.querySelector('.wp-pause').onclick = function() {
+            isLooping = false;
+            bar.querySelector('.wp-loop').classList.remove('wp-active');
+            ee.emit('pause');
+        };
+        bar.querySelector('.wp-stop').onclick = function() {
+            isLooping = false;
+            bar.querySelector('.wp-loop').classList.remove('wp-active');
+            ee.emit('stop');
+        };
+        bar.querySelector('.wp-loop').onclick = function() {
+            isLooping = !isLooping;
+            this.classList.toggle('wp-active', isLooping);
+            if (isLooping) {
+                ee.emit('play');
+            }
+        };
+        bar.querySelector('.wp-export').onclick = function() {
+            ee.emit('startaudiorendering', 'wav');
+        };
+        bar.querySelector('.wp-zoomin').onclick = function() { ee.emit('zoomin'); };
+        bar.querySelector('.wp-zoomout').onclick = function() { ee.emit('zoomout'); };
+
+        function setMode(mode, el) {
+            ee.emit('statechange', mode);
+            bar.querySelectorAll('.wp-cursor,.wp-shift,.wp-select').forEach(function(b) { b.classList.remove('wp-active'); });
+            el.classList.add('wp-active');
+        }
+        bar.querySelector('.wp-cursor').onclick = function() { setMode('cursor', this); };
+        bar.querySelector('.wp-shift').onclick = function() { setMode('shift', this); };
+        bar.querySelector('.wp-select').onclick = function() { setMode('select', this); };
+
+        ee.on('select', function(s, e) { selStart = s; selEnd = e; });
+        ee.on('finished', function() {
+            if (isLooping) {
+                setTimeout(function() {
+                    if (isLooping) { ee.emit('play'); }
+                }, 50);
+            }
+        });
+        ee.on('audiorenderingfinished', function(type, data) {
+            if (type === 'wav') {
+                var a = document.createElement('a');
+                a.href = URL.createObjectURL(data);
+                a.download = 'mix.wav';
+                a.click();
+            }
+        });
+
+        // Русификация встроенных контролов waveform-playlist
+        container.querySelectorAll('.btn-mute').forEach(function(b) { b.textContent = 'Тихо'; });
+        container.querySelectorAll('.btn-solo').forEach(function(b) { b.textContent = 'Соло'; });
+    });
+}
+"""
+
+
 def build_ui():
     """Строит Gradio UI."""
 
@@ -297,6 +429,42 @@ def build_ui():
     .prose {
         color: #e2e8f0 !important;
     }
+
+    /* Editor */
+    #wp-toolbar {
+        margin-bottom: 8px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+    }
+    #wp-toolbar button {
+        background: #2a2a2a;
+        color: #ccc;
+        border: 1px solid #444;
+        padding: 6px 14px;
+        cursor: pointer;
+        border-radius: 4px;
+        font-size: 0.9rem;
+    }
+    #wp-toolbar button:hover { background: #3a3a3a; }
+    #wp-toolbar button.wp-active {
+        background: #667eea;
+        color: #fff;
+        border-color: #667eea;
+    }
+    #wp-container {
+        min-height: 400px;
+        background: #1a1a1a;
+        border-radius: 8px;
+        overflow: hidden;
+    }
+    #wp-container .playlist .controls {
+        background: #1f1f1f !important;
+        color: #ccc !important;
+    }
+    #wp-container .playlist .controls .track-header {
+        color: #fff !important;
+    }
     """
 
     theme = gr.themes.Soft(
@@ -315,7 +483,17 @@ def build_ui():
     }
     """
 
-    with gr.Blocks(theme=theme, css=css, title=APP_NAME, js=js) as app:
+    editor_dir = os.path.join(SCRIPT_DIR, "editor")
+    editor_rel = os.path.relpath(editor_dir, SCRIPT_DIR).replace("\\", "/")
+    head = f"""
+    <link rel="stylesheet" href="/gradio_api/file={editor_rel}/playlist.css">
+    <script src="/gradio_api/file={editor_rel}/waveform-playlist.var.min.js"></script>
+    """
+
+    with gr.Blocks(theme=theme, css=css, title=APP_NAME, js=js, head=head) as app:
+
+        editor_clips = gr.State([])
+        last_generated_path = gr.State(None)
 
         gr.HTML(f"""<div class="main-header">
 <h1>{APP_NAME} v{APP_VERSION}</h1>
@@ -408,7 +586,9 @@ def build_ui():
                     with gr.Column(scale=1):
                         autoplay = gr.Checkbox(label="Автовоспроизведение", value=True)
                         output_audio = gr.Audio(label="Результат", type="filepath", autoplay=True)
+                        add_to_editor_btn = gr.Button("Добавить в редактор", variant="secondary")
                         gen_status = gr.Textbox(label="Статус", interactive=False)
+                        editor_info = gr.Markdown("Клипов в редакторе: 0")
                         spectrograms = gr.Gallery(label="Спектрограмма", columns=1, height=300)
                         piano_roll = gr.Image(label="MIDI пианоролл")
                         midi_file = gr.File(label="Скачать MIDI")
@@ -440,6 +620,46 @@ def build_ui():
                     interactive=False,
                 )
 
+            # ==========================================
+            # Вкладка 3: Редактор
+            # ==========================================
+            with gr.Tab("Редактор"):
+                with gr.Row():
+                    with gr.Column(scale=1):
+                        editor_tab_info = gr.Markdown("Клипов в редакторе: 0")
+                        load_editor_btn = gr.Button("Загрузить дорожки", variant="primary")
+                        clear_editor_btn = gr.Button("Очистить редактор")
+                        gr.Markdown("""---
+### Управление
+- **Курсор** -- прослушивание с точки
+- **Сдвиг** -- перетаскивание клипов
+- **Выделить** -- выделение области
+- **Цикл** -- зациклить выделение (сначала выделите область)
+- **Экспорт** -- скачать микс в WAV
+""")
+                    with gr.Column(scale=4):
+                        editor_html = gr.HTML("""
+<div id="wp-toolbar">
+    <button class="wp-play">Воспроизвести</button>
+    <button class="wp-pause">Пауза</button>
+    <button class="wp-stop">Стоп</button>
+    <button class="wp-loop">Цикл</button>
+    <button class="wp-cursor wp-active">Курсор</button>
+    <button class="wp-shift">Сдвиг</button>
+    <button class="wp-select">Выделить</button>
+    <button class="wp-zoomin">Zoom +</button>
+    <button class="wp-zoomout">Zoom -</button>
+    <button class="wp-export">Экспорт WAV</button>
+</div>
+<div id="wp-container">
+    <p style="color:#666; padding:2rem; text-align:center;">
+        Добавьте клипы на вкладке "Генерация" и нажмите "Загрузить дорожки"
+    </p>
+</div>
+""")
+
+                editor_hidden = gr.Textbox(visible=False)
+
         # ==========================================
         # Привязка событий
         # ==========================================
@@ -467,7 +687,7 @@ def build_ui():
                 cfg_rescale_val, use_init_val, init_audio_val, init_noise_level_val,
             )
             audio_out = gr.Audio(value=file_path, autoplay=autoplay_val)
-            return audio_out, specs, pr, midi, status
+            return audio_out, specs, pr, midi, status, file_path
 
         generate_btn.click(
             fn=do_generate_wrap,
@@ -476,7 +696,7 @@ def build_ui():
                 cfg_scale, steps, seed, sampler_type, sigma_min, sigma_max,
                 cfg_rescale, use_init, init_audio, init_noise_level, autoplay,
             ],
-            outputs=[output_audio, spectrograms, piano_roll, midi_file, gen_status],
+            outputs=[output_audio, spectrograms, piano_roll, midi_file, gen_status, last_generated_path],
         )
 
         def do_download(hf_id, custom_id):
@@ -487,6 +707,37 @@ def build_ui():
             fn=do_download,
             inputs=[hf_model_dropdown, hf_model_custom],
             outputs=[download_status, model_dropdown, local_models_list],
+        )
+
+        # Редактор: добавить клип
+        add_to_editor_btn.click(
+            fn=add_to_editor,
+            inputs=[last_generated_path, editor_clips],
+            outputs=[editor_clips, editor_info, gen_status],
+        ).then(
+            fn=lambda clips: "Клипов в редакторе: " + str(len(clips)),
+            inputs=[editor_clips],
+            outputs=[editor_tab_info],
+        )
+
+        # Редактор: загрузить дорожки
+        load_editor_btn.click(
+            fn=prepare_editor_data,
+            inputs=[editor_clips],
+            outputs=[editor_hidden],
+        ).then(
+            fn=None,
+            inputs=[editor_hidden],
+            js=EDITOR_INIT_JS,
+        )
+
+        # Редактор: очистить
+        def do_clear_editor():
+            return [], "Клипов в редакторе: 0", "Клипов в редакторе: 0"
+
+        clear_editor_btn.click(
+            fn=do_clear_editor,
+            outputs=[editor_clips, editor_info, editor_tab_info],
         )
 
     return app
@@ -510,7 +761,6 @@ def ensure_and_load_model():
         names, _ = scan_local_models()
 
     if names:
-        # Ищем Foundation_1 (модель по умолчанию), иначе берём первую
         target = next((n for n in names if "Foundation" in n), names[0])
         print(f"  Загрузка модели: {target}...")
         result = do_load_model(target)
@@ -532,6 +782,8 @@ def main():
     ensure_and_load_model()
     print()
 
+    os.chdir(SCRIPT_DIR)
+
     app = build_ui()
     app.queue(default_concurrency_limit=1).launch(
         server_name="127.0.0.1",
@@ -539,6 +791,7 @@ def main():
         share=False,
         show_error=True,
         inbrowser=True,
+        allowed_paths=[GENERATIONS_DIR, os.path.join(SCRIPT_DIR, "editor")],
     )
 
 
