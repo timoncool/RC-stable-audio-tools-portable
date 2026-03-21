@@ -9,26 +9,32 @@ var TRACK_HEIGHT = 86;
 var HEADER_WIDTH = 170;
 var RULER_HEIGHT = 30;
 var PIXELS_PER_SEC = 100; // default zoom
-// Colors matching app theme (gradient #667eea → #764ba2)
+var MAX_VOLUME = 2.0; // max segment volume (200% = +6dB boost)
+// Colors — dark theme matching Gradio app (#141414 bg, #667eea accent)
 var ACCENT = '#667eea';
 var ACCENT_LIGHT = '#8b9cf7';
 var ACCENT_DARK = '#4a5acc';
 var ACCENT_PURPLE = '#764ba2';
-var SEGMENT_COLOR = '#5a6fd6';        // slightly muted accent
-var SEGMENT_ACTIVE_COLOR = '#7b8ef0';  // brighter when selected
-var SEGMENT_BORDER_COLOR = '#4a5acc';
-var WAVE_COLOR = '#a8b8f0';
-var BG_COLOR = '#0f0f0f';
-var TRACK_BG = '#161622';             // dark with hint of blue
-var TRACK_BG_ALT = '#191928';
-var TRACK_LINE = '#252540';
-var HEADER_BG = '#14141f';
-var HEADER_BORDER = '#252540';
-var TEXT_COLOR = '#b0b0c0';
+var SEGMENT_COLOR = '#3d4e78';        // medium blue-gray, visible on dark bg
+var SEGMENT_ACTIVE_COLOR = '#4e63a0'; // brighter when selected
+var SEGMENT_BORDER_COLOR = '#5a6fd6';
+var WAVE_COLOR = '#8ea0e0';           // lighter waveform for contrast
+var BG_COLOR = '#141414';             // matches #wp-container
+var TRACK_BG = '#1e1e2a';             // slightly lighter, more visible
+var TRACK_BG_ALT = '#202030';
+var TRACK_LINE = '#333348';
+var HEADER_BG = '#222230';            // visible header, not black
+var HEADER_BORDER = '#3a3a50';
+var TEXT_COLOR = '#c0c0d0';
+var TEXT_DIM = '#888';
 var CURSOR_COLOR = '#ff6b6b';
+var VOL_LINE_COLOR = '#e8a44a';       // warm orange for volume line
+var VOL_LINE_ACTIVE = '#ffc45c';      // brighter when selected
+var FADE_COLOR = '#e8a44a';
 var HANDLE_COLOR = '#fff';
 var HANDLE_WIDTH = 6;
 var RESIZE_ZONE = 10; // px from edge for resize cursor
+var FADE_HANDLE_SIZE = 8; // size of fade triangle handles
 
 function TimelineEditor(container) {
     this.container = container;
@@ -48,7 +54,8 @@ function TimelineEditor(container) {
     this.startPlayhead = 0;
     this.animFrame = null;
     this.selectedSegment = null; // {trackIdx, segIdx}
-    this.dragMode = null; // 'move', 'resize-left', 'resize-right'
+    this.clipboard = null; // copied segment data
+    this.dragMode = null; // 'move', 'resize-left', 'resize-right', 'alt-copy'
     this.dragStartX = 0;
     this.dragOrigStart = 0;
     this.totalDuration = 30; // visible duration
@@ -152,6 +159,9 @@ TimelineEditor.prototype.addSegment = function(trackIdx, buffer, name, startTime
         duration: buffer.duration,
         trimStart: 0, // trim from beginning (seconds)
         trimEnd: 0, // trim from end (seconds)
+        volume: 1.0, // per-segment volume (0..1)
+        fadeIn: 0, // fade-in duration (seconds)
+        fadeOut: 0, // fade-out duration (seconds)
         name: name || 'Clip',
         waveform: this._computeWaveform(buffer, 500),
     };
@@ -171,6 +181,9 @@ TimelineEditor.prototype.duplicateSegment = function(trackIdx, segIdx) {
         duration: orig.duration,
         trimStart: orig.trimStart,
         trimEnd: orig.trimEnd,
+        volume: orig.volume !== undefined ? orig.volume : 1.0,
+        fadeIn: orig.fadeIn || 0,
+        fadeOut: orig.fadeOut || 0,
         name: orig.name + ' [D]',
         waveform: orig.waveform,
     };
@@ -243,12 +256,12 @@ TimelineEditor.prototype._render = function() {
         ctx.moveTo(phX, 0);
         ctx.lineTo(phX, h);
         ctx.stroke();
-        // Playhead triangle
+        // Playhead triangle (larger for easier grabbing)
         ctx.fillStyle = CURSOR_COLOR;
         ctx.beginPath();
-        ctx.moveTo(phX - 6, 0);
-        ctx.lineTo(phX + 6, 0);
-        ctx.lineTo(phX, 10);
+        ctx.moveTo(phX - 8, 0);
+        ctx.lineTo(phX + 8, 0);
+        ctx.lineTo(phX, 14);
         ctx.closePath();
         ctx.fill();
     }
@@ -265,9 +278,9 @@ TimelineEditor.prototype._render = function() {
 };
 
 TimelineEditor.prototype._drawRuler = function(ctx, w) {
-    ctx.fillStyle = '#0d0d18';
+    ctx.fillStyle = '#1a1a28';
     ctx.fillRect(0, 0, w, RULER_HEIGHT);
-    ctx.strokeStyle = '#333';
+    ctx.strokeStyle = '#3a3a50';
     ctx.lineWidth = 1;
     ctx.beginPath();
     ctx.moveTo(0, RULER_HEIGHT);
@@ -290,7 +303,7 @@ TimelineEditor.prototype._drawRuler = function(ctx, w) {
     for (var t = t0; t <= endT; t += interval) {
         var x = this._timeToX(t);
         if (x < HEADER_WIDTH) continue;
-        ctx.strokeStyle = '#333';
+        ctx.strokeStyle = '#4a4a5a';
         ctx.beginPath();
         ctx.moveTo(x, RULER_HEIGHT - 10);
         ctx.lineTo(x, RULER_HEIGHT);
@@ -398,6 +411,134 @@ TimelineEditor.prototype._drawSegment = function(ctx, trackIdx, segIdx, trackY) 
 
     ctx.globalAlpha = 1;
 
+    // Per-segment volume line (horizontal, draggable up/down)
+    // Volume maps: 0 = bottom, MAX_VOLUME = top, 1.0 (100%) = middle
+    var segVol = seg.volume !== undefined ? seg.volume : 1.0;
+    var volFrac = segVol / MAX_VOLUME; // 0..1 mapped to full height
+    var volLineY = y + h - (h * volFrac);
+    var fadeInPx = (seg.fadeIn || 0) * this.pixelsPerSec;
+    var fadeOutPx = (seg.fadeOut || 0) * this.pixelsPerSec;
+    fadeInPx = Math.min(fadeInPx, segW * 0.45);
+    fadeOutPx = Math.min(fadeOutPx, segW * 0.45);
+
+    // Draw volume envelope (fade curves + level line)
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(x, y, segW, h);
+    ctx.clip();
+
+    var lineColor = isSelected ? VOL_LINE_ACTIVE : VOL_LINE_COLOR;
+    ctx.strokeStyle = lineColor;
+    ctx.lineWidth = 2;
+    ctx.globalAlpha = 0.9;
+    ctx.beginPath();
+
+    // Start: fade-in from bottom-left to volume level
+    if (fadeInPx > 0) {
+        ctx.moveTo(x, y + h);
+        ctx.bezierCurveTo(
+            x + fadeInPx * 0.4, y + h,
+            x + fadeInPx * 0.6, volLineY,
+            x + fadeInPx, volLineY
+        );
+    } else {
+        ctx.moveTo(x, volLineY);
+    }
+
+    // Middle: flat volume line
+    var midEnd = x + segW - fadeOutPx;
+    ctx.lineTo(midEnd, volLineY);
+
+    // End: fade-out from volume level to bottom-right
+    if (fadeOutPx > 0) {
+        ctx.bezierCurveTo(
+            midEnd + fadeOutPx * 0.4, volLineY,
+            midEnd + fadeOutPx * 0.6, y + h,
+            x + segW, y + h
+        );
+    }
+
+    ctx.stroke();
+
+    // Fill fade areas with darkening overlay
+    if (fadeInPx > 0) {
+        ctx.fillStyle = 'rgba(0,0,0,0.3)';
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        ctx.lineTo(x + fadeInPx, y);
+        ctx.lineTo(x + fadeInPx, volLineY);
+        ctx.bezierCurveTo(
+            x + fadeInPx * 0.6, volLineY,
+            x + fadeInPx * 0.4, y + h,
+            x, y + h
+        );
+        ctx.closePath();
+        ctx.fill();
+    }
+    if (fadeOutPx > 0) {
+        ctx.fillStyle = 'rgba(0,0,0,0.3)';
+        ctx.beginPath();
+        ctx.moveTo(x + segW, y);
+        ctx.lineTo(midEnd, y);
+        ctx.lineTo(midEnd, volLineY);
+        ctx.bezierCurveTo(
+            midEnd + fadeOutPx * 0.4, volLineY,
+            midEnd + fadeOutPx * 0.6, y + h,
+            x + segW, y + h
+        );
+        ctx.closePath();
+        ctx.fill();
+    }
+
+    // Fade-in handle triangle (visible at left edge)
+    var fiHandleX = x + fadeInPx;
+    ctx.fillStyle = lineColor;
+    ctx.globalAlpha = 0.85;
+    ctx.beginPath();
+    ctx.moveTo(fiHandleX, volLineY);
+    ctx.lineTo(fiHandleX - FADE_HANDLE_SIZE, volLineY - FADE_HANDLE_SIZE);
+    ctx.lineTo(fiHandleX + FADE_HANDLE_SIZE, volLineY - FADE_HANDLE_SIZE);
+    ctx.closePath();
+    ctx.fill();
+
+    // Fade-out handle triangle (visible at right edge)
+    var foHandleX = midEnd;
+    ctx.beginPath();
+    ctx.moveTo(foHandleX, volLineY);
+    ctx.lineTo(foHandleX - FADE_HANDLE_SIZE, volLineY - FADE_HANDLE_SIZE);
+    ctx.lineTo(foHandleX + FADE_HANDLE_SIZE, volLineY - FADE_HANDLE_SIZE);
+    ctx.closePath();
+    ctx.fill();
+
+    // 100% reference line (dashed, subtle)
+    var refY = y + h - (h * (1.0 / MAX_VOLUME));
+    if (segVol > 1.05 || segVol < 0.95) {
+        ctx.strokeStyle = '#555';
+        ctx.lineWidth = 1;
+        ctx.globalAlpha = 0.4;
+        ctx.setLineDash([3, 3]);
+        ctx.beginPath();
+        ctx.moveTo(x, refY);
+        ctx.lineTo(x + segW, refY);
+        ctx.stroke();
+        ctx.setLineDash([]);
+    }
+
+    ctx.restore();
+    ctx.globalAlpha = 1;
+
+    // Volume percentage label on the line
+    if (segW > 50) {
+        ctx.fillStyle = lineColor;
+        ctx.font = '9px Inter, Arial, sans-serif';
+        ctx.textAlign = 'right';
+        ctx.globalAlpha = 0.85;
+        var volLabel = Math.round(segVol * 100) + '%';
+        if (segVol > 1.0) volLabel = '+' + Math.round((segVol - 1) * 100) + '%';
+        ctx.fillText(volLabel, x + segW - 4, volLineY - 4);
+        ctx.globalAlpha = 1;
+    }
+
     // Segment name
     if (segW > 40) {
         ctx.fillStyle = '#fff';
@@ -462,7 +603,7 @@ TimelineEditor.prototype._drawTrackHeader = function(ctx, trackIdx, y) {
     ctx.stroke();
 
     // Track name (truncated)
-    ctx.fillStyle = '#e0e0e0';
+    ctx.fillStyle = '#d0d0d0';
     ctx.font = '11px Inter, Arial, sans-serif';
     ctx.textAlign = 'left';
     var maxNameW = HEADER_WIDTH - 16;
@@ -482,29 +623,29 @@ TimelineEditor.prototype._drawTrackHeader = function(ctx, trackIdx, y) {
 
     // M (Mute)
     this._drawButton(ctx, bx, btnY, btnW, btnH, 'M',
-        track.muted ? '#e04050' : '#2a2a2a',
-        track.muted ? '#e04050' : '#444',
-        track.muted ? '#fff' : '#888');
+        track.muted ? '#c0353f' : '#2a2a35',
+        track.muted ? '#e04050' : '#4a4a55',
+        track.muted ? '#fff' : '#999');
 
     // S (Solo)
     bx += btnW + gap;
     this._drawButton(ctx, bx, btnY, btnW, btnH, 'S',
-        track.solo ? ACCENT : '#2a2a2a',
-        track.solo ? ACCENT : '#444',
-        track.solo ? '#fff' : '#888');
+        track.solo ? ACCENT_DARK : '#2a2a35',
+        track.solo ? ACCENT : '#4a4a55',
+        track.solo ? '#fff' : '#999');
 
     // D (Duplicate)
     bx += btnW + gap;
     var hasSel = this.selectedSegment && this.selectedSegment.trackIdx === trackIdx;
     this._drawButton(ctx, bx, btnY, btnW, btnH, 'D',
-        '#2a2a2a', hasSel ? ACCENT : '#444', hasSel ? '#bbb' : '#555');
+        '#2a2a35', hasSel ? ACCENT : '#4a4a55', hasSel ? '#ccc' : '#777');
 
     // X (Delete)
     bx += btnW + gap;
     this._drawButton(ctx, bx, btnY, btnW, btnH, '\u2715',
-        '#2a2a2a', '#444', '#666');
+        '#2a2a35', '#4a4a55', '#777');
 
-    // Volume slider (interactive)
+    // Volume slider (horizontal, in header)
     var slX = 10;
     var slY = y + 56;
     var slW = HEADER_WIDTH - 20;
@@ -513,7 +654,7 @@ TimelineEditor.prototype._drawTrackHeader = function(ctx, trackIdx, y) {
     var vol = track.volume;
 
     // Label
-    ctx.fillStyle = '#666';
+    ctx.fillStyle = TEXT_DIM;
     ctx.font = '9px Inter, Arial, sans-serif';
     ctx.textAlign = 'left';
     ctx.fillText('VOL', slX, slY - 2);
@@ -521,7 +662,7 @@ TimelineEditor.prototype._drawTrackHeader = function(ctx, trackIdx, y) {
     ctx.fillText(Math.round(vol * 100) + '%', slX + slW, slY - 2);
 
     // Track (background)
-    ctx.fillStyle = '#2a2a2a';
+    ctx.fillStyle = '#333340';
     this._roundRect(ctx, slX, slY, slW, slH, 3);
     ctx.fill();
 
@@ -534,14 +675,14 @@ TimelineEditor.prototype._drawTrackHeader = function(ctx, trackIdx, y) {
 
     // Knob
     var knobX = slX + slW * vol;
-    ctx.fillStyle = '#fff';
-    ctx.shadowColor = 'rgba(0,0,0,0.4)';
+    ctx.fillStyle = '#e0e0e0';
+    ctx.shadowColor = 'rgba(0,0,0,0.5)';
     ctx.shadowBlur = 3;
     ctx.beginPath();
     ctx.arc(knobX, slY + slH / 2, knobR, 0, Math.PI * 2);
     ctx.fill();
     ctx.shadowBlur = 0;
-    ctx.strokeStyle = '#555';
+    ctx.strokeStyle = '#444';
     ctx.lineWidth = 1;
     ctx.stroke();
 };
@@ -609,7 +750,7 @@ TimelineEditor.prototype._getHeaderButtonAt = function(trackIdx, x, y) {
         bx += btnW + gap;
         if (x >= bx && x <= bx + btnW) return 'delete';
     }
-    // Volume slider area
+    // Volume slider area (horizontal)
     var slY = ty + 56;
     var slH = 6;
     var knobR = 7;
@@ -627,9 +768,18 @@ TimelineEditor.prototype._onMouseDown = function(e) {
     // Focus canvas for keyboard events
     this.canvas.focus();
 
-    // Click on ruler — set playhead
+    // Click on ruler — set playhead + start drag
     if (my < RULER_HEIGHT) {
         this.playhead = Math.max(0, this._xToTime(mx));
+        this.dragMode = 'playhead';
+        this._render();
+        return;
+    }
+
+    // Click near playhead line (within 8px) on any track — start drag
+    var phX = this._timeToX(this.playhead);
+    if (Math.abs(mx - phX) < 8 && mx >= HEADER_WIDTH) {
+        this.dragMode = 'playhead';
         this._render();
         return;
     }
@@ -644,7 +794,9 @@ TimelineEditor.prototype._onMouseDown = function(e) {
         } else if (btn === 'solo') {
             this.tracks[trackIdx].solo = !this.tracks[trackIdx].solo;
         } else if (btn === 'delete') {
+            this.selectedSegment = null;
             this.removeTrack(trackIdx);
+            return;
         } else if (btn === 'duplicate') {
             if (this.selectedSegment && this.selectedSegment.trackIdx === trackIdx) {
                 this.duplicateSegment(trackIdx, this.selectedSegment.segIdx);
@@ -669,19 +821,69 @@ TimelineEditor.prototype._onMouseDown = function(e) {
             var segX = this._timeToX(seg.start);
             var effectiveDur = seg.duration - seg.trimStart - seg.trimEnd;
             var segEndX = segX + effectiveDur * this.pixelsPerSec;
+            var segY = RULER_HEIGHT + trackIdx * TRACK_HEIGHT + 4;
+            var segH = TRACK_HEIGHT - 8;
 
+            // Check volume line hit
+            var segVol = seg.volume !== undefined ? seg.volume : 1.0;
+            var volFrac = segVol / MAX_VOLUME;
+            var volLineY = segY + segH - (segH * volFrac);
+            var fadeInPx = Math.min((seg.fadeIn || 0) * this.pixelsPerSec, (segEndX - segX) * 0.45);
+            var fadeOutPx = Math.min((seg.fadeOut || 0) * this.pixelsPerSec, (segEndX - segX) * 0.45);
+
+            // Check fade-in handle (triangle near left end of volume line)
+            var fiHandleX = segX + fadeInPx;
+            if (Math.abs(mx - fiHandleX) < FADE_HANDLE_SIZE + 4 && Math.abs(my - volLineY) < FADE_HANDLE_SIZE + 4) {
+                this.dragMode = 'fade-in';
+                this.dragStartX = mx;
+                this.dragOrigFadeIn = seg.fadeIn || 0;
+            }
+            // Check fade-out handle (triangle near right end of volume line)
+            else if (Math.abs(mx - (segEndX - fadeOutPx)) < FADE_HANDLE_SIZE + 4 && Math.abs(my - volLineY) < FADE_HANDLE_SIZE + 4) {
+                this.dragMode = 'fade-out';
+                this.dragStartX = mx;
+                this.dragOrigFadeOut = seg.fadeOut || 0;
+            }
+            // Check volume line (within 8px vertically, between fade handles)
+            else if (Math.abs(my - volLineY) < 8 &&
+                     mx > segX + fadeInPx + FADE_HANDLE_SIZE && mx < segEndX - fadeOutPx - FADE_HANDLE_SIZE) {
+                this.dragMode = 'seg-volume';
+                this.dragStartY = my;
+                this.dragOrigSegVol = segVol;
+            }
             // Check resize handles
-            if (mx - segX < RESIZE_ZONE) {
+            else if (mx - segX < RESIZE_ZONE) {
                 this.dragMode = 'resize-left';
             } else if (segEndX - mx < RESIZE_ZONE) {
                 this.dragMode = 'resize-right';
+            } else if (e.altKey) {
+                // Alt+drag — copy segment and move the copy
+                var origSeg = seg;
+                var newSeg = {
+                    buffer: origSeg.buffer,
+                    start: origSeg.start,
+                    duration: origSeg.duration,
+                    trimStart: origSeg.trimStart,
+                    trimEnd: origSeg.trimEnd,
+                    volume: origSeg.volume,
+                    fadeIn: origSeg.fadeIn || 0,
+                    fadeOut: origSeg.fadeOut || 0,
+                    name: origSeg.name + ' [C]',
+                    waveform: origSeg.waveform
+                };
+                this.tracks[trackIdx].segments.push(newSeg);
+                var newIdx = this.tracks[trackIdx].segments.length - 1;
+                this.selectedSegment = {trackIdx: trackIdx, segIdx: newIdx};
+                this.dragMode = 'move';
             } else {
                 this.dragMode = 'move';
             }
             this.dragStartX = mx;
-            this.dragOrigStart = seg.start;
-            this.dragOrigTrimStart = seg.trimStart;
-            this.dragOrigTrimEnd = seg.trimEnd;
+            // Re-read seg in case selectedSegment changed (Alt+drag creates copy)
+            var activeSeg = this.tracks[this.selectedSegment.trackIdx].segments[this.selectedSegment.segIdx];
+            this.dragOrigStart = activeSeg.start;
+            this.dragOrigTrimStart = activeSeg.trimStart;
+            this.dragOrigTrimEnd = activeSeg.trimEnd;
         } else {
             this.selectedSegment = null;
             // Click on empty timeline — set playhead
@@ -696,14 +898,22 @@ TimelineEditor.prototype._onMouseMove = function(e) {
     var mx = e.clientX - rect.left;
     var my = e.clientY - rect.top;
 
-    // Volume slider drag
+    // Playhead drag
+    if (this.dragMode === 'playhead') {
+        this.playhead = Math.max(0, this._xToTime(mx));
+        this._render();
+        return;
+    }
+
+    // Volume slider drag (horizontal, header)
     if (this.dragMode === 'volume' && this._volumeTrackIdx !== undefined) {
         var slX = 10, slW = HEADER_WIDTH - 20;
         var vol = Math.max(0, Math.min(1, (mx - slX) / slW));
         this.tracks[this._volumeTrackIdx].volume = vol;
         // Update live gain node if playing
+        var dragTrack = this.tracks[this._volumeTrackIdx];
         for (var gi = 0; gi < this.gainNodes.length; gi++) {
-            if (this.gainNodes[gi].trackIdx === this._volumeTrackIdx) {
+            if (this.gainNodes[gi].track === dragTrack) {
                 this.gainNodes[gi].node.gain.value = vol;
             }
         }
@@ -717,7 +927,41 @@ TimelineEditor.prototype._onMouseMove = function(e) {
         var dx = mx - this.dragStartX;
         var dt = dx / this.pixelsPerSec;
 
-        if (this.dragMode === 'move') {
+        if (this.dragMode === 'seg-volume') {
+            // Drag volume line up/down (range 0..MAX_VOLUME)
+            var segY = RULER_HEIGHT + this.selectedSegment.trackIdx * TRACK_HEIGHT + 4;
+            var segH = TRACK_HEIGHT - 8;
+            var dy = this.dragStartY - my; // up = positive
+            var volDelta = (dy / segH) * MAX_VOLUME;
+            seg.volume = Math.max(0, Math.min(MAX_VOLUME, this.dragOrigSegVol + volDelta));
+            // Live update gain during playback
+            if (this.isPlaying && this.segGainNodes) {
+                for (var gi = 0; gi < this.segGainNodes.length; gi++) {
+                    if (this.segGainNodes[gi].seg === seg) {
+                        this.segGainNodes[gi].node.gain.cancelScheduledValues(this.audioCtx.currentTime);
+                        this.segGainNodes[gi].node.gain.setValueAtTime(seg.volume, this.audioCtx.currentTime);
+                    }
+                }
+            }
+            this._render();
+            return;
+        } else if (this.dragMode === 'fade-in') {
+            // Drag right = more fade-in
+            var effectiveDur = seg.duration - seg.trimStart - seg.trimEnd;
+            var newFade = Math.max(0, this.dragOrigFadeIn + dt);
+            newFade = Math.min(newFade, effectiveDur * 0.45);
+            seg.fadeIn = newFade;
+            this._render();
+            return;
+        } else if (this.dragMode === 'fade-out') {
+            // Drag left = more fade-out
+            var effectiveDur = seg.duration - seg.trimStart - seg.trimEnd;
+            var newFade = Math.max(0, this.dragOrigFadeOut - dt);
+            newFade = Math.min(newFade, effectiveDur * 0.45);
+            seg.fadeOut = newFade;
+            this._render();
+            return;
+        } else if (this.dragMode === 'move') {
             seg.start = Math.max(0, this.dragOrigStart + dt);
         } else if (this.dragMode === 'resize-left') {
             // dt > 0 means mouse moved right = more trim from start
@@ -738,7 +982,13 @@ TimelineEditor.prototype._onMouseMove = function(e) {
         return;
     }
 
-    // Hover cursor
+    // Hover cursor — check playhead first
+    var phX = this._timeToX(this.playhead);
+    if (Math.abs(mx - phX) < 8 && mx >= HEADER_WIDTH && my > RULER_HEIGHT) {
+        this.canvas.style.cursor = 'col-resize';
+        return;
+    }
+
     if (my > RULER_HEIGHT && mx >= HEADER_WIDTH) {
         var trackIdx = this._getTrackAt(my);
         var segIdx = this._getSegmentAt(trackIdx, mx);
@@ -747,7 +997,27 @@ TimelineEditor.prototype._onMouseMove = function(e) {
             var segX = this._timeToX(seg.start);
             var effectiveDur = seg.duration - seg.trimStart - seg.trimEnd;
             var segEndX = segX + effectiveDur * this.pixelsPerSec;
-            if (mx - segX < RESIZE_ZONE || segEndX - mx < RESIZE_ZONE) {
+            var segY = RULER_HEIGHT + trackIdx * TRACK_HEIGHT + 4;
+            var segH = TRACK_HEIGHT - 8;
+            var segVol = seg.volume !== undefined ? seg.volume : 1.0;
+            var volFrac = segVol / MAX_VOLUME;
+            var volLineY = segY + segH - (segH * volFrac);
+            var fadeInPx = Math.min((seg.fadeIn || 0) * this.pixelsPerSec, (segEndX - segX) * 0.45);
+            var fadeOutPx = Math.min((seg.fadeOut || 0) * this.pixelsPerSec, (segEndX - segX) * 0.45);
+
+            // Check fade handle hover
+            var fiHandleX = segX + fadeInPx;
+            var foHandleX = segEndX - fadeOutPx;
+            if (Math.abs(mx - fiHandleX) < FADE_HANDLE_SIZE + 4 && Math.abs(my - volLineY) < FADE_HANDLE_SIZE + 4) {
+                this.canvas.style.cursor = 'ew-resize';
+            } else if (Math.abs(mx - foHandleX) < FADE_HANDLE_SIZE + 4 && Math.abs(my - volLineY) < FADE_HANDLE_SIZE + 4) {
+                this.canvas.style.cursor = 'ew-resize';
+            }
+            // Check volume line hover
+            else if (Math.abs(my - volLineY) < 8 &&
+                mx > segX + fadeInPx + FADE_HANDLE_SIZE && mx < segEndX - fadeOutPx - FADE_HANDLE_SIZE) {
+                this.canvas.style.cursor = 'ns-resize';
+            } else if (mx - segX < RESIZE_ZONE || segEndX - mx < RESIZE_ZONE) {
                 this.canvas.style.cursor = 'ew-resize';
             } else {
                 this.canvas.style.cursor = 'grab';
@@ -784,6 +1054,81 @@ TimelineEditor.prototype._onKeyDown = function(e) {
     var key = e.key.toLowerCase();
     var sel = this.selectedSegment;
     var trackIdx = sel ? sel.trackIdx : -1;
+    var ctrl = e.ctrlKey || e.metaKey;
+
+    // Ctrl+C — копировать сегмент
+    if (ctrl && key === 'c' && sel) {
+        var seg = this.tracks[sel.trackIdx].segments[sel.segIdx];
+        this.clipboard = {
+            buffer: seg.buffer,
+            duration: seg.duration,
+            trimStart: seg.trimStart,
+            trimEnd: seg.trimEnd,
+            volume: seg.volume,
+            fadeIn: seg.fadeIn,
+            fadeOut: seg.fadeOut,
+            name: seg.name,
+            waveform: seg.waveform,
+            sourceTrackIdx: sel.trackIdx
+        };
+        e.preventDefault();
+        return;
+    }
+
+    // Ctrl+X — вырезать сегмент
+    if (ctrl && key === 'x' && sel) {
+        var seg = this.tracks[sel.trackIdx].segments[sel.segIdx];
+        this.clipboard = {
+            buffer: seg.buffer,
+            duration: seg.duration,
+            trimStart: seg.trimStart,
+            trimEnd: seg.trimEnd,
+            volume: seg.volume,
+            fadeIn: seg.fadeIn,
+            fadeOut: seg.fadeOut,
+            name: seg.name,
+            waveform: seg.waveform,
+            sourceTrackIdx: sel.trackIdx
+        };
+        this.removeSegment(sel.trackIdx, sel.segIdx);
+        this.selectedSegment = null;
+        this._render();
+        e.preventDefault();
+        return;
+    }
+
+    // Ctrl+V — вставить сегмент на позицию playhead
+    if (ctrl && key === 'v' && this.clipboard) {
+        var targetTrack = trackIdx >= 0 ? trackIdx : this.clipboard.sourceTrackIdx;
+        if (targetTrack >= 0 && targetTrack < this.tracks.length) {
+            var newSeg = {
+                buffer: this.clipboard.buffer,
+                start: this.playhead,
+                duration: this.clipboard.duration,
+                trimStart: this.clipboard.trimStart,
+                trimEnd: this.clipboard.trimEnd,
+                volume: this.clipboard.volume,
+                fadeIn: this.clipboard.fadeIn,
+                fadeOut: this.clipboard.fadeOut,
+                name: this.clipboard.name + ' [P]',
+                waveform: this.clipboard.waveform
+            };
+            this.tracks[targetTrack].segments.push(newSeg);
+            var newIdx = this.tracks[targetTrack].segments.length - 1;
+            this.selectedSegment = {trackIdx: targetTrack, segIdx: newIdx};
+            this._updateTotalDuration();
+            this._render();
+        }
+        e.preventDefault();
+        return;
+    }
+
+    // Ctrl+D — дублировать выделенный сегмент
+    if (ctrl && key === 'd' && sel) {
+        this.duplicateSegment(sel.trackIdx, sel.segIdx);
+        e.preventDefault();
+        return;
+    }
 
     // Delete / Backspace — удалить выделенный сегмент
     if (key === 'delete' || key === 'backspace') {
@@ -796,8 +1141,8 @@ TimelineEditor.prototype._onKeyDown = function(e) {
         return;
     }
 
-    // D — дублировать выделенный сегмент
-    if (key === 'd' && sel) {
+    // D — дублировать выделенный сегмент (без Ctrl тоже работает)
+    if (key === 'd' && !ctrl && sel) {
         this.duplicateSegment(sel.trackIdx, sel.segIdx);
         e.preventDefault();
         return;
@@ -812,18 +1157,17 @@ TimelineEditor.prototype._onKeyDown = function(e) {
     }
 
     // S — solo трека выделенного сегмента
-    if (key === 's' && trackIdx >= 0) {
+    if (key === 's' && !ctrl && trackIdx >= 0) {
         this.tracks[trackIdx].solo = !this.tracks[trackIdx].solo;
         this._render();
         e.preventDefault();
         return;
     }
 
-    // X — удалить трек выделенного сегмента
-    if (key === 'x' && trackIdx >= 0) {
-        this.removeTrack(trackIdx);
+    // X — удалить трек выделенного сегмента (без Ctrl)
+    if (key === 'x' && !ctrl && trackIdx >= 0) {
         this.selectedSegment = null;
-        this._render();
+        this.removeTrack(trackIdx);
         e.preventDefault();
         return;
     }
@@ -883,6 +1227,7 @@ TimelineEditor.prototype.play = function() {
 
     this.sources = [];
     this.gainNodes = [];
+    this.segGainNodes = []; // per-segment {seg, node} for live volume updates
     for (var t = 0; t < this.tracks.length; t++) {
         var track = this.tracks[t];
         if (track.muted) continue;
@@ -892,7 +1237,7 @@ TimelineEditor.prototype.play = function() {
         var trackGain = this.audioCtx.createGain();
         trackGain.gain.value = trackVol;
         trackGain.connect(this.audioCtx.destination);
-        this.gainNodes.push({trackIdx: t, node: trackGain});
+        this.gainNodes.push({track: track, node: trackGain});
 
         for (var s = 0; s < track.segments.length; s++) {
             var seg = track.segments[s];
@@ -900,14 +1245,59 @@ TimelineEditor.prototype.play = function() {
             var offset = seg.start - this.playhead;
             var src = this.audioCtx.createBufferSource();
             src.buffer = seg.buffer;
-            src.connect(trackGain);
 
+            // Per-segment gain with fade automation
+            var segGain = this.audioCtx.createGain();
+            var segVol = seg.volume !== undefined ? seg.volume : 1.0;
+            segGain.gain.value = segVol;
+            src.connect(segGain);
+            segGain.connect(trackGain);
+
+            var startWhen, bufOffset, playDur;
             if (offset >= 0) {
-                src.start(this.audioCtx.currentTime + offset, seg.trimStart, effectiveDur);
+                startWhen = this.audioCtx.currentTime + offset;
+                bufOffset = seg.trimStart;
+                playDur = effectiveDur;
             } else if (offset + effectiveDur > 0) {
                 var skipTime = -offset;
-                src.start(this.audioCtx.currentTime, seg.trimStart + skipTime, effectiveDur - skipTime);
+                startWhen = this.audioCtx.currentTime;
+                bufOffset = seg.trimStart + skipTime;
+                playDur = effectiveDur - skipTime;
+            } else {
+                continue; // segment already passed
             }
+
+            src.start(startWhen, bufOffset, playDur);
+            this.segGainNodes.push({seg: seg, node: segGain});
+
+            // Fade-in automation
+            if (seg.fadeIn > 0) {
+                var fadeStart = startWhen;
+                if (offset < 0) {
+                    // Already past some of the clip
+                    var skipTime = -offset;
+                    if (skipTime < seg.fadeIn) {
+                        // Still in fade-in range
+                        var currentFadePos = skipTime / seg.fadeIn;
+                        segGain.gain.setValueAtTime(segVol * currentFadePos, fadeStart);
+                        segGain.gain.linearRampToValueAtTime(segVol, fadeStart + (seg.fadeIn - skipTime));
+                    }
+                } else {
+                    segGain.gain.setValueAtTime(0, fadeStart);
+                    segGain.gain.linearRampToValueAtTime(segVol, fadeStart + seg.fadeIn);
+                }
+            }
+
+            // Fade-out automation
+            if (seg.fadeOut > 0) {
+                var segEnd = startWhen + playDur;
+                var fadeOutStart = segEnd - seg.fadeOut;
+                if (fadeOutStart > this.audioCtx.currentTime) {
+                    segGain.gain.setValueAtTime(segVol, Math.max(fadeOutStart, startWhen));
+                    segGain.gain.linearRampToValueAtTime(0, segEnd);
+                }
+            }
+
             this.sources.push(src);
         }
     }
@@ -920,11 +1310,11 @@ TimelineEditor.prototype._animatePlayhead = function() {
     var elapsed = this.audioCtx.currentTime - this.startTime;
     this.playhead = this.startPlayhead + elapsed;
 
-    // Check if past all content (loop uses actual content end, not padded)
-    var endTime = this.isLooping ? this.contentDuration : this.totalDuration;
-    if (this.playhead > endTime) {
+    // Check if past all content
+    if (this.playhead >= this.contentDuration) {
         if (this.isLooping) {
             this.playhead = 0;
+            this.isPlaying = false;
             this._stopPlayback();
             this.play();
             return;
@@ -943,6 +1333,7 @@ TimelineEditor.prototype._stopPlayback = function() {
         try { this.sources[i].stop(); } catch(e) {}
     }
     this.sources = [];
+    this.segGainNodes = [];
 };
 
 TimelineEditor.prototype.pause = function() {
@@ -1007,16 +1398,38 @@ TimelineEditor.prototype.exportWAV = function() {
         if (hasSolo && !track.solo) continue;
 
         var trackVol = track.volume !== undefined ? track.volume : 0.8;
+        var trackGain = offlineCtx.createGain();
+        trackGain.gain.value = trackVol;
+        trackGain.connect(offlineCtx.destination);
+
         for (var s = 0; s < track.segments.length; s++) {
             var seg = track.segments[s];
             var effectiveDur = seg.duration - seg.trimStart - seg.trimEnd;
             var src = offlineCtx.createBufferSource();
             src.buffer = seg.buffer;
-            var gain = offlineCtx.createGain();
-            gain.gain.value = trackVol;
-            src.connect(gain);
-            gain.connect(offlineCtx.destination);
-            src.start(seg.start, seg.trimStart, effectiveDur);
+
+            // Per-segment gain with fade
+            var segGain = offlineCtx.createGain();
+            var segVol = seg.volume !== undefined ? seg.volume : 1.0;
+            segGain.gain.value = segVol;
+            src.connect(segGain);
+            segGain.connect(trackGain);
+
+            var startWhen = seg.start;
+            src.start(startWhen, seg.trimStart, effectiveDur);
+
+            // Fade-in
+            if (seg.fadeIn > 0) {
+                segGain.gain.setValueAtTime(0, startWhen);
+                segGain.gain.linearRampToValueAtTime(segVol, startWhen + seg.fadeIn);
+            }
+
+            // Fade-out
+            if (seg.fadeOut > 0) {
+                var segEnd = startWhen + effectiveDur;
+                segGain.gain.setValueAtTime(segVol, segEnd - seg.fadeOut);
+                segGain.gain.linearRampToValueAtTime(0, segEnd);
+            }
         }
     }
 

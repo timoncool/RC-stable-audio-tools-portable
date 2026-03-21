@@ -332,6 +332,59 @@ EDITOR_INIT_JS = """
 }
 """
 
+EDITOR_ADD_CLIP_JS = """
+(clipsJson) => {
+    const clips = JSON.parse(clipsJson);
+    if (!clips || !clips.length) { return; }
+
+    // Задержка — вкладка только что переключилась, дать DOM отрисоваться
+    setTimeout(function() {
+        var container = document.getElementById('wp-container');
+        if (!container) { console.error('[EDITOR] wp-container not found'); return; }
+
+        // Если редактор уже есть — добавляем только последний клип
+        if (window._timeline) {
+            var last = clips[clips.length - 1];
+            var trackIdx = window._timeline.tracks.length;
+            window._timeline.loadClip(last.url, last.name, trackIdx, 0).then(function() {
+                console.log('[EDITOR] Added clip: ' + last.name);
+            }).catch(function(err) {
+                console.error('[EDITOR] Add clip error:', err);
+            });
+            return;
+        }
+
+        // Создаём редактор с нуля
+        container.innerHTML = '';
+        var editor = new TimelineEditor(container);
+        window._timeline = editor;
+
+        var loadPromises = clips.map(function(c, i) {
+            return editor.loadClip(c.url, c.name, i, 0);
+        });
+        Promise.all(loadPromises).then(function() {
+            console.log('[EDITOR] Loaded ' + clips.length + ' clips');
+        }).catch(function(err) {
+            console.error('[EDITOR] Load error:', err);
+        });
+
+        // Привязка тулбара
+        var bar = document.getElementById('wp-toolbar');
+        bar.querySelector('.wp-play').onclick = function() { editor.play(); };
+        bar.querySelector('.wp-pause').onclick = function() { editor.pause(); };
+        bar.querySelector('.wp-stop').onclick = function() { editor.stop(); };
+        bar.querySelector('.wp-loop').onclick = function() {
+            var on = editor.toggleLoop();
+            this.classList.toggle('wp-active', on);
+            if (on && !editor.isPlaying) editor.play();
+        };
+        bar.querySelector('.wp-zoomin').onclick = function() { editor.zoomIn(); };
+        bar.querySelector('.wp-zoomout').onclick = function() { editor.zoomOut(); };
+        bar.querySelector('.wp-export').onclick = function() { editor.exportWAV(); };
+    }, 200);
+}
+"""
+
 
 def build_ui():
     """Строит Gradio UI."""
@@ -435,11 +488,11 @@ def build_ui():
 <p style="font-size:0.85rem; opacity:0.9; margin-top:0.3rem;"><a href="https://t.me/neuroport" target="_blank">Нейро-Софт</a> — репаки и портативки полезных нейросетей</p>
 </div>""")
 
-        with gr.Tabs():
+        with gr.Tabs() as main_tabs:
             # ==========================================
             # Вкладка 1: Генерация
             # ==========================================
-            with gr.Tab("Генерация"):
+            with gr.Tab("Генерация", id="tab_gen"):
                 with gr.Row():
                     # Колонка 1: Управление
                     with gr.Column(scale=1):
@@ -529,7 +582,7 @@ def build_ui():
             # ==========================================
             # Вкладка 2: Загрузка моделей
             # ==========================================
-            with gr.Tab("Загрузка моделей"):
+            with gr.Tab("Загрузка моделей", id="tab_models"):
                 gr.Markdown("## Скачивание моделей из HuggingFace")
                 gr.Markdown("Выберите модель и нажмите 'Скачать'. После скачивания модель появится на вкладке 'Генерация'.")
 
@@ -556,7 +609,7 @@ def build_ui():
             # ==========================================
             # Вкладка 3: Редактор
             # ==========================================
-            with gr.Tab("Редактор"):
+            with gr.Tab("Редактор", id="tab_editor"):
                 with gr.Row():
                     with gr.Column(scale=1):
                         editor_tab_info = gr.Markdown("Клипов в редакторе: 0")
@@ -565,13 +618,16 @@ def build_ui():
                         gr.Markdown("""---
 ### Управление
 - **Перетаскивание** -- двигайте сегменты мышью
+- **Alt+перетаскивание** -- копировать сегмент
 - **Края сегмента** -- тяните за край для обрезки
+- **Линия громкости** -- тяните вверх/вниз (до 200%)
+- **Треугольники** -- fade-in / fade-out
 - **Клик по линейке** -- переместить плейхед
 - **Колесо мыши** -- прокрутка, Ctrl+колесо -- зум
 - **Пробел** -- воспроизведение / пауза
+- **Ctrl+C/V/X** -- копировать / вставить / вырезать
 - **Delete** -- удалить выбранный сегмент
-- **M** -- заглушить трек, **S** -- соло
-- **D** -- дублировать сегмент
+- **D** -- дублировать, **M** -- mute, **S** -- solo
 - **X** -- удалить трек, **+/-** -- зум
 """)
                     with gr.Column(scale=4):
@@ -587,7 +643,7 @@ def build_ui():
 </div>
 <div id="wp-container">
     <p style="color:#666; padding:2rem; text-align:center;">
-        Добавьте клипы на вкладке "Генерация" и нажмите "Загрузить дорожки"
+        Добавьте клипы на вкладке "Генерация" — они появятся здесь автоматически
     </p>
 </div>
 """)
@@ -642,7 +698,7 @@ def build_ui():
             outputs=[download_status, model_dropdown, local_models_list],
         )
 
-        # Редактор: добавить клип
+        # Редактор: добавить клип и сразу загрузить в таймлайн
         add_to_editor_btn.click(
             fn=add_to_editor,
             inputs=[last_generated_path, editor_clips],
@@ -651,6 +707,17 @@ def build_ui():
             fn=lambda clips: "Клипов в редакторе: " + str(len(clips)),
             inputs=[editor_clips],
             outputs=[editor_tab_info],
+        ).then(
+            fn=lambda: gr.update(selected="tab_editor"),
+            outputs=[main_tabs],
+        ).then(
+            fn=prepare_editor_data,
+            inputs=[editor_clips],
+            outputs=[editor_hidden],
+        ).then(
+            fn=None,
+            inputs=[editor_hidden],
+            js=EDITOR_ADD_CLIP_JS,
         )
 
         # Редактор: загрузить дорожки
