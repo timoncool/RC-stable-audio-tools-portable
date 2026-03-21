@@ -58,6 +58,9 @@ function TimelineEditor(container) {
     this.dragMode = null; // 'move', 'resize-left', 'resize-right', 'alt-copy'
     this.dragStartX = 0;
     this.dragOrigStart = 0;
+    this.snapEnabled = true;
+    this.bpm = 120;
+    this.snapThreshold = 0.08; // seconds — proximity to snap
     this.totalDuration = 30; // visible duration
     this.contentDuration = 10; // actual content end (no padding)
     this._onResize = this._onResize.bind(this);
@@ -144,7 +147,48 @@ TimelineEditor.prototype._computeWaveform = function(buffer, numPoints) {
     return wave;
 };
 
+// Snap time to nearest beat grid or segment edge
+TimelineEditor.prototype._snap = function(t, excludeTrack, excludeSeg) {
+    if (!this.snapEnabled) return t;
+    var best = t;
+    var bestDist = this.snapThreshold;
+
+    // Snap to beat grid
+    var beatLen = 60.0 / this.bpm;
+    var nearestBeat = Math.round(t / beatLen) * beatLen;
+    var d = Math.abs(t - nearestBeat);
+    if (d < bestDist) { bestDist = d; best = nearestBeat; }
+
+    // Snap to half-beat
+    var halfBeat = beatLen / 2;
+    var nearestHalf = Math.round(t / halfBeat) * halfBeat;
+    d = Math.abs(t - nearestHalf);
+    if (d < bestDist) { bestDist = d; best = nearestHalf; }
+
+    // Snap to other segments' edges
+    for (var ti = 0; ti < this.tracks.length; ti++) {
+        var segs = this.tracks[ti].segments;
+        for (var si = 0; si < segs.length; si++) {
+            if (ti === excludeTrack && si === excludeSeg) continue;
+            var s = segs[si];
+            var segStart = s.start;
+            var segEnd = s.start + s.duration - s.trimStart - s.trimEnd;
+            // Snap to segment start
+            d = Math.abs(t - segStart);
+            if (d < bestDist) { bestDist = d; best = segStart; }
+            // Snap to segment end
+            d = Math.abs(t - segEnd);
+            if (d < bestDist) { bestDist = d; best = segEnd; }
+        }
+    }
+    return Math.max(0, best);
+};
+
 TimelineEditor.prototype.addTrack = function(name) {
+    if (this.tracks.length >= 20) {
+        console.warn('[EDITOR] Max 20 tracks reached');
+        return -1;
+    }
     this.tracks.push({name: name, segments: [], muted: false, solo: false});
     this._resize();
     this._render();
@@ -319,6 +363,30 @@ TimelineEditor.prototype._drawRuler = function(ctx, w) {
             ctx.fillText(secs + 's', x, RULER_HEIGHT - 13);
         }
     }
+
+    // Beat ticks on ruler
+    if (this.snapEnabled && this.bpm > 0) {
+        var beatLen = 60.0 / this.bpm;
+        var b0 = Math.floor(startT / beatLen) * beatLen;
+        for (var bt = b0; bt <= endT; bt += beatLen) {
+            var bx = this._timeToX(bt);
+            if (bx < HEADER_WIDTH) continue;
+            var beatNum = Math.round(bt / beatLen);
+            if (beatNum % 4 === 0) {
+                ctx.strokeStyle = '#7080b0';
+                ctx.beginPath();
+                ctx.moveTo(bx, RULER_HEIGHT - 6);
+                ctx.lineTo(bx, RULER_HEIGHT);
+                ctx.stroke();
+            } else {
+                ctx.strokeStyle = '#555a70';
+                ctx.beginPath();
+                ctx.moveTo(bx, RULER_HEIGHT - 3);
+                ctx.lineTo(bx, RULER_HEIGHT);
+                ctx.stroke();
+            }
+        }
+    }
 };
 
 TimelineEditor.prototype._drawTrack = function(ctx, trackIdx, y, w) {
@@ -327,6 +395,30 @@ TimelineEditor.prototype._drawTrack = function(ctx, trackIdx, y, w) {
     // Track background
     ctx.fillStyle = trackIdx % 2 === 0 ? TRACK_BG : TRACK_BG_ALT;
     ctx.fillRect(HEADER_WIDTH, y, w - HEADER_WIDTH, TRACK_HEIGHT);
+
+    // Beat grid lines
+    if (this.snapEnabled && this.bpm > 0) {
+        var beatLen = 60.0 / this.bpm;
+        var startT = Math.max(0, this._xToTime(HEADER_WIDTH));
+        var endT = this._xToTime(w);
+        var b0 = Math.floor(startT / beatLen) * beatLen;
+        ctx.lineWidth = 1;
+        for (var bt = b0; bt <= endT; bt += beatLen) {
+            var bx = this._timeToX(bt);
+            if (bx < HEADER_WIDTH) continue;
+            var beatNum = Math.round(bt / beatLen);
+            // Bar line (every 4 beats) vs beat line
+            if (beatNum % 4 === 0) {
+                ctx.strokeStyle = 'rgba(100, 120, 180, 0.25)';
+            } else {
+                ctx.strokeStyle = 'rgba(100, 120, 180, 0.1)';
+            }
+            ctx.beginPath();
+            ctx.moveTo(bx, y);
+            ctx.lineTo(bx, y + TRACK_HEIGHT);
+            ctx.stroke();
+        }
+    }
 
     // Track line
     ctx.strokeStyle = TRACK_LINE;
@@ -771,7 +863,7 @@ TimelineEditor.prototype._onMouseDown = function(e) {
 
     // Click on ruler — set playhead + start drag
     if (my < RULER_HEIGHT) {
-        this.playhead = Math.max(0, this._xToTime(mx));
+        this.playhead = this._snap(Math.max(0, this._xToTime(mx)), -1, -1);
         this.dragMode = 'playhead';
         this._render();
         return;
@@ -902,7 +994,7 @@ TimelineEditor.prototype._onMouseMove = function(e) {
 
     // Playhead drag
     if (this.dragMode === 'playhead') {
-        this.playhead = Math.max(0, this._xToTime(mx));
+        this.playhead = this._snap(Math.max(0, this._xToTime(mx)), -1, -1);
         this._render();
         return;
     }
@@ -925,7 +1017,8 @@ TimelineEditor.prototype._onMouseMove = function(e) {
 
     // Segment drag
     if (this.selectedSegment && this.dragMode) {
-        var seg = this.tracks[this.selectedSegment.trackIdx].segments[this.selectedSegment.segIdx];
+        var sel = this.selectedSegment;
+        var seg = this.tracks[sel.trackIdx].segments[sel.segIdx];
         var dx = mx - this.dragStartX;
         var dt = dx / this.pixelsPerSec;
 
@@ -964,20 +1057,29 @@ TimelineEditor.prototype._onMouseMove = function(e) {
             this._render();
             return;
         } else if (this.dragMode === 'move') {
-            seg.start = Math.max(0, this.dragOrigStart + dt);
+            var rawStart = Math.max(0, this.dragOrigStart + dt);
+            seg.start = this._snap(rawStart, sel.trackIdx, sel.segIdx);
         } else if (this.dragMode === 'resize-left') {
             // dt > 0 means mouse moved right = more trim from start
             var newTrim = Math.max(0, Math.min(this.dragOrigTrimStart + dt, seg.duration - seg.trimEnd - 0.05));
             var actualDelta = newTrim - this.dragOrigTrimStart;
             seg.trimStart = newTrim;
-            seg.start = Math.max(0, this.dragOrigStart + actualDelta);
+            var rawStartL = Math.max(0, this.dragOrigStart + actualDelta);
+            var snappedL = this._snap(rawStartL, sel.trackIdx, sel.segIdx);
+            var snapDelta = snappedL - rawStartL;
+            seg.start = snappedL;
+            seg.trimStart = Math.max(0, newTrim + snapDelta);
         } else if (this.dragMode === 'resize-right') {
             // dt > 0 means mouse moved right = less trim from end
             var newTrimEnd = this.dragOrigTrimEnd - dt;
             newTrimEnd = Math.max(0, newTrimEnd);
             var maxTrimEnd = seg.duration - seg.trimStart - 0.05;
             newTrimEnd = Math.min(newTrimEnd, maxTrimEnd);
-            seg.trimEnd = newTrimEnd;
+            // Snap right edge
+            var effectiveEnd = seg.start + seg.duration - seg.trimStart - newTrimEnd;
+            var snappedEnd = this._snap(effectiveEnd, sel.trackIdx, sel.segIdx);
+            var endDelta = snappedEnd - effectiveEnd;
+            seg.trimEnd = Math.max(0, Math.min(newTrimEnd - endDelta, maxTrimEnd));
         }
         this._updateTotalDuration();
         this._render();

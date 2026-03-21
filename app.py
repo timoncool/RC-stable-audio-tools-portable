@@ -329,6 +329,23 @@ EDITOR_INIT_JS = """
     bar.querySelector('.wp-zoomin').onclick = function() { editor.zoomIn(); };
     bar.querySelector('.wp-zoomout').onclick = function() { editor.zoomOut(); };
     bar.querySelector('.wp-export').onclick = function() { editor.exportWAV(); };
+    var bpmInput = bar.querySelector('.wp-bpm');
+    if (bpmInput) {
+        bpmInput.oninput = bpmInput.onchange = function() {
+            editor.bpm = Math.max(20, Math.min(300, parseInt(this.value) || 120));
+            editor._render();
+        };
+    }
+    var snapBtn = bar.querySelector('.wp-snap');
+    if (snapBtn) {
+        snapBtn.onclick = function() {
+            editor.snapEnabled = !editor.snapEnabled;
+            this.textContent = 'Snap: ' + (editor.snapEnabled ? 'ON' : 'OFF');
+            this.classList.toggle('wp-active', editor.snapEnabled);
+            editor._render();
+        };
+        snapBtn.classList.add('wp-active');
+    }
 }
 """
 
@@ -382,6 +399,23 @@ EDITOR_ADD_CLIP_JS = """
         bar.querySelector('.wp-zoomin').onclick = function() { editor.zoomIn(); };
         bar.querySelector('.wp-zoomout').onclick = function() { editor.zoomOut(); };
         bar.querySelector('.wp-export').onclick = function() { editor.exportWAV(); };
+        var bpmInput = bar.querySelector('.wp-bpm');
+        if (bpmInput) {
+            bpmInput.oninput = bpmInput.onchange = function() {
+                editor.bpm = Math.max(20, Math.min(300, parseInt(this.value) || 120));
+                editor._render();
+            };
+        }
+        var snapBtn = bar.querySelector('.wp-snap');
+        if (snapBtn) {
+            snapBtn.onclick = function() {
+                editor.snapEnabled = !editor.snapEnabled;
+                this.textContent = 'Snap: ' + (editor.snapEnabled ? 'ON' : 'OFF');
+                this.classList.toggle('wp-active', editor.snapEnabled);
+                editor._render();
+            };
+            snapBtn.classList.add('wp-active');
+        }
     }, 200);
 }
 """
@@ -484,7 +518,7 @@ def build_ui():
         last_generated_path = gr.State(None)
 
         gr.HTML(f"""<div class="main-header">
-<h1>{APP_NAME} v{APP_VERSION}</h1>
+<h1>{APP_NAME}</h1>
 <p>Улучшенный форк RC Stable Audio Tools, оптимизированный под модель Foundation_1, со встроенным редактором треков</p>
 <p style="font-size:0.85rem; opacity:0.9; margin-top:0.5rem;">Собрал <a href="https://t.me/nerual_dreming" target="_blank">Nerual Dreming</a> — основатель <a href="https://artgeneration.me/" target="_blank">ArtGeneration.me</a>, техноблогер и нейро-евангелист.</p>
 <p style="font-size:0.85rem; opacity:0.9; margin-top:0.3rem;"><a href="https://t.me/neuroport" target="_blank">Нейро-Софт</a> — репаки и портативки полезных нейросетей</p>
@@ -546,7 +580,7 @@ def build_ui():
                                 value="dpmpp-3m-sde",
                             )
                             with gr.Row():
-                                steps = gr.Slider(label="Шаги", minimum=1, maximum=500, value=250, step=1)
+                                steps = gr.Slider(label="Шаги", minimum=1, maximum=500, value=75, step=1)
                                 cfg_scale = gr.Slider(label="CFG масштаб", minimum=0, maximum=25, value=7.0, step=0.1)
                             with gr.Row():
                                 sigma_min = gr.Slider(label="Sigma min", minimum=0, maximum=2, value=0.03, step=0.01)
@@ -642,6 +676,9 @@ def build_ui():
     <button class="wp-zoomin">Zoom +</button>
     <button class="wp-zoomout">Zoom -</button>
     <button class="wp-export">Экспорт WAV</button>
+    <label style="color:#c0c0d0; font-size:12px; margin-left:8px;">BPM:</label>
+    <input type="number" class="wp-bpm" value="120" min="20" max="300" style="width:55px; background:#2a2a35; color:#c0c0d0; border:1px solid #444; border-radius:4px; padding:2px 4px; font-size:12px;">
+    <button class="wp-snap" title="Привязка к сетке" style="font-size:12px;">Snap: ON</button>
 </div>
 <div id="wp-container">
     <p style="color:#666; padding:2rem; text-align:center;">
@@ -678,7 +715,7 @@ def build_ui():
                 sampler_type_val, sigma_min_val, sigma_max_val,
                 cfg_rescale_val, use_init_val, init_audio_val, init_noise_level_val,
             )
-            return gr.update(value=file_path, autoplay=autoplay_val), specs, pr, midi, status, file_path
+            return gr.Audio(value=file_path, autoplay=autoplay_val), specs, pr, midi, status, file_path
 
         generate_btn.click(
             fn=do_generate_wrap,
@@ -740,6 +777,19 @@ def build_ui():
         clear_editor_btn.click(
             fn=do_clear_editor,
             outputs=[editor_clips, editor_info, editor_tab_info],
+            js="""() => {
+                if (window._timeline) {
+                    window._timeline.stop();
+                    window._timeline.tracks = [];
+                    window._timeline.selectedSegment = null;
+                    window._timeline._render();
+                }
+                var c = document.getElementById('wp-container');
+                if (c) {
+                    c.innerHTML = '<p style="color:#666; padding:2rem; text-align:center;">Редактор очищен</p>';
+                    window._timeline = null;
+                }
+            }""",
         )
 
     return app

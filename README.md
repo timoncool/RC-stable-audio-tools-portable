@@ -1,13 +1,27 @@
 # Foundation Music Lab
 
+[![Stars](https://img.shields.io/github/stars/timoncool/RC-stable-audio-tools-portable?style=social)](https://github.com/timoncool/RC-stable-audio-tools-portable/stargazers)
+[![License](https://img.shields.io/github/license/timoncool/RC-stable-audio-tools-portable)](LICENSE)
+
 Улучшенный и оптимизированный под модель Foundation_1 форк [RC Stable Audio Tools](https://github.com/RoyalCities/RC-stable-audio-tools) со встроенным редактором треков.
 
 Портативная русскоязычная версия для Windows.
 
+> **Если проект полезен — поставьте звёздочку!** Это помогает другим находить проект и мотивирует на развитие.
+
+## Скриншоты
+
+### Генерация музыки
+![Генератор](screenshots/generator.png)
+
+### Таймлайн-редактор
+![Редактор](screenshots/editor.png)
+
 ## Возможности
 
 - Генерация музыки по текстовому промпту (оптимизация под Foundation_1)
-- Встроенный таймлайн-редактор треков (мульти-трек, drag & drop, экспорт WAV)
+- Встроенный таймлайн-редактор треков (мульти-трек до 20 дорожек, drag & drop, экспорт WAV)
+- Snap к сетке битов (BPM) и краям сегментов
 - Громкость на каждый сегмент (0-200%) с изменением в реальном времени
 - Fade-in / Fade-out с визуальными ручками
 - Clipboard (Ctrl+C/V/X), дублирование (D), Alt+drag копирование
@@ -52,7 +66,7 @@
 
 Запустите `run.bat` — приложение откроется в браузере автоматически.
 
-При первом запуске выберите и скачайте модель в интерфейсе (вкладка "Download Models").
+При первом запуске выберите и скачайте модель в интерфейсе (вкладка "Загрузка моделей").
 
 ## Обновление
 
@@ -63,6 +77,7 @@
 ```
 RC-stable-audio-tools-portable/
 ├── app.py              — основной файл приложения
+├── editor/             — таймлайн-редактор
 ├── install.bat          — установщик
 ├── run.bat              — запуск
 ├── update.bat           — обновление
@@ -89,6 +104,17 @@ RC-stable-audio-tools-portable/
 - **Stable Audio Open 1.0** — открытая модель
 - **Vocal Textures Main** — вокальные текстуры
 - **Audialab EDM Elements** — EDM элементы
+
+## Другие портативные нейросети
+
+| Проект | Описание |
+|--------|----------|
+| [VibeVoice ASR](https://github.com/timoncool/VibeVoice_ASR_portable_ru) | Распознавание речи (ASR) |
+| [LavaSR](https://github.com/timoncool/LavaSR_portable_ru) | Улучшение качества аудио |
+| [Qwen3-TTS](https://github.com/timoncool/Qwen3-TTS_portable_rus) | Синтез речи (TTS) от Qwen |
+| [SuperCaption Qwen3-VL](https://github.com/timoncool/SuperCaption_Qwen3-VL) | Генерация описаний изображений |
+| [Wan2GP](https://github.com/timoncool/Wan2GP_wan.best) | AI-генерация видео (Wan 2.1/2.2, Hunyuan, LTX) |
+| [VideoSOS](https://github.com/timoncool/videosos) | AI-видеопродакшн в браузере |
 
 ## Авторы
 
