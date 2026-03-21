@@ -1,12 +1,16 @@
-# RC Stable Audio Tools — Portable RU
+# Foundation Music Lab
 
-Портативная русскоязычная версия [RC-stable-audio-tools](https://github.com/RoyalCities/RC-stable-audio-tools) для Windows.
+Улучшенный и оптимизированный под модель Foundation_1 форк [RC Stable Audio Tools](https://github.com/RoyalCities/RC-stable-audio-tools) со встроенным редактором треков.
 
-Генерация музыки и аудио по текстовому описанию с помощью Stable Audio.
+Портативная русскоязычная версия для Windows.
 
 ## Возможности
 
-- Генерация музыки по текстовому промпту
+- Генерация музыки по текстовому промпту (оптимизация под Foundation_1)
+- Встроенный таймлайн-редактор треков (мульти-трек, drag & drop, экспорт WAV)
+- Громкость на каждый сегмент (0-200%) с изменением в реальном времени
+- Fade-in / Fade-out с визуальными ручками
+- Clipboard (Ctrl+C/V/X), дублирование (D), Alt+drag копирование
 - Выбор BPM, тональности, количества тактов
 - AI стилизация (Style Transfer)
 - MIDI-экспорт + визуализация пианоролла

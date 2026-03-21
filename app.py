@@ -100,7 +100,7 @@ from stable_audio_tools.interface.gradio import (
     load_model_action,
 )
 
-APP_NAME = "RC Stable Audio Tools"
+APP_NAME = "Foundation Music Lab"
 APP_VERSION = "1.0"
 DEFAULT_MODEL = "RoyalCities/Foundation-1"
 
@@ -345,6 +345,7 @@ EDITOR_ADD_CLIP_JS = """
         // Если редактор уже есть — добавляем только последний клип
         if (window._timeline) {
             var last = clips[clips.length - 1];
+            console.log('[EDITOR] Adding clip URL:', last.url, 'name:', last.name);
             var trackIdx = window._timeline.tracks.length;
             window._timeline.loadClip(last.url, last.name, trackIdx, 0).then(function() {
                 console.log('[EDITOR] Added clip: ' + last.name);
@@ -413,6 +414,7 @@ def build_ui():
     .main-header a {
         color: white !important;
         text-decoration: underline;
+        padding: 0 !important;
     }
 
     .tab-nav button {
@@ -483,7 +485,7 @@ def build_ui():
 
         gr.HTML(f"""<div class="main-header">
 <h1>{APP_NAME} v{APP_VERSION}</h1>
-<p>Генерация музыки и аудио по текстовому описанию</p>
+<p>Улучшенный форк RC Stable Audio Tools, оптимизированный под модель Foundation_1, со встроенным редактором треков</p>
 <p style="font-size:0.85rem; opacity:0.9; margin-top:0.5rem;">Собрал <a href="https://t.me/nerual_dreming" target="_blank">Nerual Dreming</a> — основатель <a href="https://artgeneration.me/" target="_blank">ArtGeneration.me</a>, техноблогер и нейро-евангелист.</p>
 <p style="font-size:0.85rem; opacity:0.9; margin-top:0.3rem;"><a href="https://t.me/neuroport" target="_blank">Нейро-Софт</a> — репаки и портативки полезных нейросетей</p>
 </div>""")

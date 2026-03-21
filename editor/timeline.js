@@ -189,6 +189,7 @@ TimelineEditor.prototype.duplicateSegment = function(trackIdx, segIdx) {
     };
     track.segments.push(newSeg);
     this._updateTotalDuration();
+    if (this.isPlaying) this._scheduleLiveSegment(trackIdx, newSeg);
     this._render();
 };
 
@@ -874,6 +875,7 @@ TimelineEditor.prototype._onMouseDown = function(e) {
                 this.tracks[trackIdx].segments.push(newSeg);
                 var newIdx = this.tracks[trackIdx].segments.length - 1;
                 this.selectedSegment = {trackIdx: trackIdx, segIdx: newIdx};
+                if (this.isPlaying) this._scheduleLiveSegment(trackIdx, newSeg);
                 this.dragMode = 'move';
             } else {
                 this.dragMode = 'move';
@@ -1117,6 +1119,7 @@ TimelineEditor.prototype._onKeyDown = function(e) {
             var newIdx = this.tracks[targetTrack].segments.length - 1;
             this.selectedSegment = {trackIdx: targetTrack, segIdx: newIdx};
             this._updateTotalDuration();
+            if (this.isPlaying) this._scheduleLiveSegment(targetTrack, newSeg);
             this._render();
         }
         e.preventDefault();
@@ -1343,6 +1346,83 @@ TimelineEditor.prototype.pause = function() {
     this._stopPlayback();
     if (this.animFrame) cancelAnimationFrame(this.animFrame);
     this._render();
+};
+
+// Schedule a single segment for live playback (used when adding segments during play)
+TimelineEditor.prototype._scheduleLiveSegment = function(trackIdx, seg) {
+    if (!this.isPlaying || !this.audioCtx) return;
+    var track = this.tracks[trackIdx];
+    if (!track || track.muted) return;
+
+    // Check solo
+    var hasSolo = false;
+    for (var t = 0; t < this.tracks.length; t++) {
+        if (this.tracks[t].solo) { hasSolo = true; break; }
+    }
+    if (hasSolo && !track.solo) return;
+
+    // Find existing trackGain or create one
+    var trackGain = null;
+    for (var gi = 0; gi < this.gainNodes.length; gi++) {
+        if (this.gainNodes[gi].track === track) {
+            trackGain = this.gainNodes[gi].node;
+            break;
+        }
+    }
+    if (!trackGain) {
+        var trackVol = track.volume !== undefined ? track.volume : 0.8;
+        trackGain = this.audioCtx.createGain();
+        trackGain.gain.value = trackVol;
+        trackGain.connect(this.audioCtx.destination);
+        this.gainNodes.push({track: track, node: trackGain});
+    }
+
+    var currentPlayhead = this.startPlayhead + (this.audioCtx.currentTime - this.startTime);
+    var effectiveDur = seg.duration - seg.trimStart - seg.trimEnd;
+    var offset = seg.start - currentPlayhead;
+
+    var src = this.audioCtx.createBufferSource();
+    src.buffer = seg.buffer;
+
+    var segGain = this.audioCtx.createGain();
+    var segVol = seg.volume !== undefined ? seg.volume : 1.0;
+    segGain.gain.value = segVol;
+    src.connect(segGain);
+    segGain.connect(trackGain);
+    this.segGainNodes.push({seg: seg, node: segGain});
+
+    var startWhen, bufOffset, playDur;
+    if (offset >= 0) {
+        startWhen = this.audioCtx.currentTime + offset;
+        bufOffset = seg.trimStart;
+        playDur = effectiveDur;
+    } else if (offset + effectiveDur > 0) {
+        var skipTime = -offset;
+        startWhen = this.audioCtx.currentTime;
+        bufOffset = seg.trimStart + skipTime;
+        playDur = effectiveDur - skipTime;
+    } else {
+        return; // segment already passed
+    }
+
+    src.start(startWhen, bufOffset, playDur);
+
+    // Fade-in
+    if (seg.fadeIn > 0 && offset >= 0) {
+        segGain.gain.setValueAtTime(0, startWhen);
+        segGain.gain.linearRampToValueAtTime(segVol, startWhen + seg.fadeIn);
+    }
+    // Fade-out
+    if (seg.fadeOut > 0) {
+        var segEnd = startWhen + playDur;
+        var fadeOutStart = segEnd - seg.fadeOut;
+        if (fadeOutStart > this.audioCtx.currentTime) {
+            segGain.gain.setValueAtTime(segVol, Math.max(fadeOutStart, startWhen));
+            segGain.gain.linearRampToValueAtTime(0, segEnd);
+        }
+    }
+
+    this.sources.push(src);
 };
 
 TimelineEditor.prototype.stop = function() {
