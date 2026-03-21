@@ -45,9 +45,9 @@ function TimelineEditor(container) {
     this.dragMode = null; // 'move', 'resize-left', 'resize-right'
     this.dragStartX = 0;
     this.dragOrigStart = 0;
-    this.dragOrigDuration = 0;
     this.totalDuration = 30; // visible duration
     this._onResize = this._onResize.bind(this);
+    this._animatePlayhead = this._animatePlayhead.bind(this);
 
     this._init();
 }
@@ -85,6 +85,9 @@ TimelineEditor.prototype.destroy = function() {
     window.removeEventListener('resize', this._onResize);
     if (this.animFrame) cancelAnimationFrame(this.animFrame);
     this.stop();
+    if (this.audioCtx && this.audioCtx.state !== 'closed') {
+        this.audioCtx.close();
+    }
 };
 
 TimelineEditor.prototype._onResize = function() {
@@ -281,9 +284,10 @@ TimelineEditor.prototype._drawRuler = function(ctx, w) {
         ctx.stroke();
         // Time label
         var mins = Math.floor(t / 60);
-        var secs = (t % 60).toFixed(interval < 1 ? 1 : 0);
+        var secsNum = t % 60;
+        var secs = secsNum.toFixed(interval < 1 ? 1 : 0);
         if (mins > 0) {
-            ctx.fillText(mins + ':' + (secs < 10 ? '0' : '') + secs, x, RULER_HEIGHT - 13);
+            ctx.fillText(mins + ':' + (secsNum < 10 ? '0' : '') + secs, x, RULER_HEIGHT - 13);
         } else {
             ctx.fillText(secs + 's', x, RULER_HEIGHT - 13);
         }
@@ -695,13 +699,10 @@ TimelineEditor.prototype._onMouseMove = function(e) {
             seg.start = Math.max(0, this.dragOrigStart + dt);
         } else if (this.dragMode === 'resize-left') {
             // dt > 0 means mouse moved right = more trim from start
-            var newTrim = this.dragOrigTrimStart + dt;
-            newTrim = Math.max(0, newTrim);
-            var maxTrim = seg.duration - seg.trimEnd - 0.05;
-            newTrim = Math.min(newTrim, maxTrim);
+            var newTrim = Math.max(0, Math.min(this.dragOrigTrimStart + dt, seg.duration - seg.trimEnd - 0.05));
+            var actualDelta = newTrim - this.dragOrigTrimStart;
             seg.trimStart = newTrim;
-            // Move start so the right edge stays in place
-            seg.start = this.dragOrigStart + (newTrim - this.dragOrigTrimStart);
+            seg.start = Math.max(0, this.dragOrigStart + actualDelta);
         } else if (this.dragMode === 'resize-right') {
             // dt > 0 means mouse moved right = less trim from end
             var newTrimEnd = this.dragOrigTrimEnd - dt;
@@ -835,7 +836,7 @@ TimelineEditor.prototype._animatePlayhead = function() {
     }
 
     this._render();
-    this.animFrame = requestAnimationFrame(this._animatePlayhead.bind(this));
+    this.animFrame = requestAnimationFrame(this._animatePlayhead);
 };
 
 TimelineEditor.prototype._stopPlayback = function() {
@@ -906,12 +907,16 @@ TimelineEditor.prototype.exportWAV = function() {
         if (track.muted) continue;
         if (hasSolo && !track.solo) continue;
 
+        var trackVol = track.volume !== undefined ? track.volume : 0.8;
         for (var s = 0; s < track.segments.length; s++) {
             var seg = track.segments[s];
             var effectiveDur = seg.duration - seg.trimStart - seg.trimEnd;
             var src = offlineCtx.createBufferSource();
             src.buffer = seg.buffer;
-            src.connect(offlineCtx.destination);
+            var gain = offlineCtx.createGain();
+            gain.gain.value = trackVol;
+            src.connect(gain);
+            gain.connect(offlineCtx.destination);
             src.start(seg.start, seg.trimStart, effectiveDur);
         }
     }
