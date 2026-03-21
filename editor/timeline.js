@@ -9,17 +9,22 @@ var TRACK_HEIGHT = 86;
 var HEADER_WIDTH = 170;
 var RULER_HEIGHT = 30;
 var PIXELS_PER_SEC = 100; // default zoom
-var SEGMENT_COLOR = '#667eea';
-var SEGMENT_ACTIVE_COLOR = '#8b9cf7';
+// Colors matching app theme (gradient #667eea → #764ba2)
+var ACCENT = '#667eea';
+var ACCENT_LIGHT = '#8b9cf7';
+var ACCENT_DARK = '#4a5acc';
+var ACCENT_PURPLE = '#764ba2';
+var SEGMENT_COLOR = '#5a6fd6';        // slightly muted accent
+var SEGMENT_ACTIVE_COLOR = '#7b8ef0';  // brighter when selected
 var SEGMENT_BORDER_COLOR = '#4a5acc';
-var WAVE_COLOR = '#c0ccff';
-var BG_COLOR = '#111';
-var TRACK_BG = '#1a1a1a';
-var TRACK_BG_ALT = '#1d1d1d';
-var TRACK_LINE = '#2a2a2a';
-var HEADER_BG = '#1c1c1c';
-var HEADER_BORDER = '#2a2a2a';
-var TEXT_COLOR = '#bbb';
+var WAVE_COLOR = '#a8b8f0';
+var BG_COLOR = '#0f0f0f';
+var TRACK_BG = '#161622';             // dark with hint of blue
+var TRACK_BG_ALT = '#191928';
+var TRACK_LINE = '#252540';
+var HEADER_BG = '#14141f';
+var HEADER_BORDER = '#252540';
+var TEXT_COLOR = '#b0b0c0';
 var CURSOR_COLOR = '#ff6b6b';
 var HANDLE_COLOR = '#fff';
 var HANDLE_WIDTH = 6;
@@ -38,6 +43,7 @@ function TimelineEditor(container) {
     this.isLooping = false;
     this.audioCtx = null;
     this.sources = [];
+    this.gainNodes = []; // per-track GainNodes for live volume
     this.startTime = 0;
     this.startPlayhead = 0;
     this.animFrame = null;
@@ -46,8 +52,10 @@ function TimelineEditor(container) {
     this.dragStartX = 0;
     this.dragOrigStart = 0;
     this.totalDuration = 30; // visible duration
+    this.contentDuration = 10; // actual content end (no padding)
     this._onResize = this._onResize.bind(this);
     this._animatePlayhead = this._animatePlayhead.bind(this);
+    this._onKeyDown = this._onKeyDown.bind(this);
 
     this._init();
 }
@@ -74,6 +82,9 @@ TimelineEditor.prototype._init = function() {
     this.canvas.addEventListener('mouseup', this._onMouseUp.bind(this));
     this.canvas.addEventListener('mouseleave', this._onMouseUp.bind(this));
     this.canvas.addEventListener('dblclick', this._onDblClick.bind(this));
+    this.canvas.tabIndex = 0;
+    this.canvas.style.outline = 'none';
+    this.canvas.addEventListener('keydown', this._onKeyDown);
     window.addEventListener('resize', this._onResize);
 
     this.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -83,6 +94,7 @@ TimelineEditor.prototype._init = function() {
 
 TimelineEditor.prototype.destroy = function() {
     window.removeEventListener('resize', this._onResize);
+    this.canvas.removeEventListener('keydown', this._onKeyDown);
     if (this.animFrame) cancelAnimationFrame(this.animFrame);
     this.stop();
     if (this.audioCtx && this.audioCtx.state !== 'closed') {
@@ -182,7 +194,7 @@ TimelineEditor.prototype.removeTrack = function(trackIdx) {
 };
 
 TimelineEditor.prototype._updateTotalDuration = function() {
-    var maxEnd = 10;
+    var maxEnd = 0;
     for (var t = 0; t < this.tracks.length; t++) {
         var segs = this.tracks[t].segments;
         for (var s = 0; s < segs.length; s++) {
@@ -190,7 +202,8 @@ TimelineEditor.prototype._updateTotalDuration = function() {
             if (end > maxEnd) maxEnd = end;
         }
     }
-    this.totalDuration = maxEnd + 5;
+    this.contentDuration = maxEnd || 10;
+    this.totalDuration = this.contentDuration + 5;
 };
 
 TimelineEditor.prototype._timeToX = function(t) {
@@ -252,7 +265,7 @@ TimelineEditor.prototype._render = function() {
 };
 
 TimelineEditor.prototype._drawRuler = function(ctx, w) {
-    ctx.fillStyle = '#111';
+    ctx.fillStyle = '#0d0d18';
     ctx.fillRect(0, 0, w, RULER_HEIGHT);
     ctx.strokeStyle = '#333';
     ctx.lineWidth = 1;
@@ -476,15 +489,15 @@ TimelineEditor.prototype._drawTrackHeader = function(ctx, trackIdx, y) {
     // S (Solo)
     bx += btnW + gap;
     this._drawButton(ctx, bx, btnY, btnW, btnH, 'S',
-        track.solo ? '#667eea' : '#2a2a2a',
-        track.solo ? '#667eea' : '#444',
+        track.solo ? ACCENT : '#2a2a2a',
+        track.solo ? ACCENT : '#444',
         track.solo ? '#fff' : '#888');
 
     // D (Duplicate)
     bx += btnW + gap;
     var hasSel = this.selectedSegment && this.selectedSegment.trackIdx === trackIdx;
     this._drawButton(ctx, bx, btnY, btnW, btnH, 'D',
-        '#2a2a2a', hasSel ? '#667eea' : '#444', hasSel ? '#bbb' : '#555');
+        '#2a2a2a', hasSel ? ACCENT : '#444', hasSel ? '#bbb' : '#555');
 
     // X (Delete)
     bx += btnW + gap;
@@ -514,7 +527,7 @@ TimelineEditor.prototype._drawTrackHeader = function(ctx, trackIdx, y) {
 
     // Track (filled)
     if (vol > 0) {
-        ctx.fillStyle = '#667eea';
+        ctx.fillStyle = ACCENT;
         this._roundRect(ctx, slX, slY, slW * vol, slH, 3);
         ctx.fill();
     }
@@ -611,6 +624,9 @@ TimelineEditor.prototype._onMouseDown = function(e) {
     var mx = e.clientX - rect.left;
     var my = e.clientY - rect.top;
 
+    // Focus canvas for keyboard events
+    this.canvas.focus();
+
     // Click on ruler — set playhead
     if (my < RULER_HEIGHT) {
         this.playhead = Math.max(0, this._xToTime(mx));
@@ -685,6 +701,12 @@ TimelineEditor.prototype._onMouseMove = function(e) {
         var slX = 10, slW = HEADER_WIDTH - 20;
         var vol = Math.max(0, Math.min(1, (mx - slX) / slW));
         this.tracks[this._volumeTrackIdx].volume = vol;
+        // Update live gain node if playing
+        for (var gi = 0; gi < this.gainNodes.length; gi++) {
+            if (this.gainNodes[gi].trackIdx === this._volumeTrackIdx) {
+                this.gainNodes[gi].node.gain.value = vol;
+            }
+        }
         this._render();
         return;
     }
@@ -758,6 +780,80 @@ TimelineEditor.prototype._onDblClick = function(e) {
     }
 };
 
+TimelineEditor.prototype._onKeyDown = function(e) {
+    var key = e.key.toLowerCase();
+    var sel = this.selectedSegment;
+    var trackIdx = sel ? sel.trackIdx : -1;
+
+    // Delete / Backspace — удалить выделенный сегмент
+    if (key === 'delete' || key === 'backspace') {
+        if (sel) {
+            this.removeSegment(sel.trackIdx, sel.segIdx);
+            this.selectedSegment = null;
+            this._render();
+        }
+        e.preventDefault();
+        return;
+    }
+
+    // D — дублировать выделенный сегмент
+    if (key === 'd' && sel) {
+        this.duplicateSegment(sel.trackIdx, sel.segIdx);
+        e.preventDefault();
+        return;
+    }
+
+    // M — mute трека выделенного сегмента
+    if (key === 'm' && trackIdx >= 0) {
+        this.tracks[trackIdx].muted = !this.tracks[trackIdx].muted;
+        this._render();
+        e.preventDefault();
+        return;
+    }
+
+    // S — solo трека выделенного сегмента
+    if (key === 's' && trackIdx >= 0) {
+        this.tracks[trackIdx].solo = !this.tracks[trackIdx].solo;
+        this._render();
+        e.preventDefault();
+        return;
+    }
+
+    // X — удалить трек выделенного сегмента
+    if (key === 'x' && trackIdx >= 0) {
+        this.removeTrack(trackIdx);
+        this.selectedSegment = null;
+        this._render();
+        e.preventDefault();
+        return;
+    }
+
+    // + / = — zoom in
+    if (key === '+' || key === '=') {
+        this.zoomIn();
+        e.preventDefault();
+        return;
+    }
+
+    // - — zoom out
+    if (key === '-') {
+        this.zoomOut();
+        e.preventDefault();
+        return;
+    }
+
+    // Space — play/pause
+    if (key === ' ') {
+        if (this.isPlaying) {
+            this.pause();
+        } else {
+            this.play();
+        }
+        e.preventDefault();
+        return;
+    }
+};
+
 TimelineEditor.prototype._onWheel = function(e) {
     e.preventDefault();
     if (e.ctrlKey) {
@@ -786,22 +882,25 @@ TimelineEditor.prototype.play = function() {
     }
 
     this.sources = [];
+    this.gainNodes = [];
     for (var t = 0; t < this.tracks.length; t++) {
         var track = this.tracks[t];
         if (track.muted) continue;
         if (hasSolo && !track.solo) continue;
 
         var trackVol = track.volume !== undefined ? track.volume : 0.8;
+        var trackGain = this.audioCtx.createGain();
+        trackGain.gain.value = trackVol;
+        trackGain.connect(this.audioCtx.destination);
+        this.gainNodes.push({trackIdx: t, node: trackGain});
+
         for (var s = 0; s < track.segments.length; s++) {
             var seg = track.segments[s];
             var effectiveDur = seg.duration - seg.trimStart - seg.trimEnd;
             var offset = seg.start - this.playhead;
             var src = this.audioCtx.createBufferSource();
             src.buffer = seg.buffer;
-            var gain = this.audioCtx.createGain();
-            gain.gain.value = trackVol;
-            src.connect(gain);
-            gain.connect(this.audioCtx.destination);
+            src.connect(trackGain);
 
             if (offset >= 0) {
                 src.start(this.audioCtx.currentTime + offset, seg.trimStart, effectiveDur);
@@ -813,7 +912,6 @@ TimelineEditor.prototype.play = function() {
         }
     }
 
-    var self = this;
     this._animatePlayhead();
 };
 
@@ -822,8 +920,9 @@ TimelineEditor.prototype._animatePlayhead = function() {
     var elapsed = this.audioCtx.currentTime - this.startTime;
     this.playhead = this.startPlayhead + elapsed;
 
-    // Check if past all content
-    if (this.playhead > this.totalDuration) {
+    // Check if past all content (loop uses actual content end, not padded)
+    var endTime = this.isLooping ? this.contentDuration : this.totalDuration;
+    if (this.playhead > endTime) {
         if (this.isLooping) {
             this.playhead = 0;
             this._stopPlayback();
