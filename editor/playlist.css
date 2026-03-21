@@ -1,36 +1,36 @@
 :root {
-  --wp-controls-border-color: #000;
-  --wp-controls-background-color: #fff;
-  --wp-mute-solo-color: #343a40;
+  --wp-controls-border-color: #333;
+  --wp-controls-background-color: #1a1a1a;
+  --wp-mute-solo-color: #888;
   --wp-mute-solo-hover-color: #fff;
-  --wp-mute-solo-focus-color: rgba(52, 58, 64, 0.5);
-  --wp-btn-danger-background-hover-color: #c82333;
-  --wp-btn-danger-border-hover-color: #bd2130;
-  --wp-btn-danger-background-color: #dc3545;
-  --wp-btn-danger-border-color: #dc3545;
-  --wp-btn-danger-focus-color: rgba(225, 83, 97, 0.5);
-  --wp-btn-danger-color: #fff;
+  --wp-mute-solo-focus-color: rgba(102, 126, 234, 0.4);
+  --wp-btn-danger-background-hover-color: #e04050;
+  --wp-btn-danger-border-hover-color: #c0303e;
+  --wp-btn-danger-background-color: transparent;
+  --wp-btn-danger-border-color: #555;
+  --wp-btn-danger-focus-color: rgba(225, 83, 97, 0.4);
+  --wp-btn-danger-color: #aaa;
   --wp-btn-info-background-hover-color: #138496;
   --wp-btn-info-border-hover-color: #117a8b;
   --wp-btn-info-background-color: #17a2b8;
   --wp-btn-info-border-color: #17a2b8;
   --wp-btn-info-focus-color: rgba(58, 176, 195, 0.5);
   --wp-btn-info-color: #fff;
-  --wp-fade-background-color: rgba(0, 0, 0, 0.1);
-  --wp-channel-color: grey;
-  --wp-channel-progress-color: #fbbc04;
-  --wp-cursor-color: black;
-  --wp-selection-background-color: rgba(0, 0, 0, 0.1);
-  --wp-selection-point-color: red;
-  --wp-tracks-container-background-color: #e0eff1;
-  --wp-range-slider-label-color: black;
-  --wp-range-slider-color: goldenrod;
-  --wp-range-slider-focus-color: black;
-  --wp-range-slider-background-color: #ddd;
-  --wp-range-slider-background-focus-color: #bbb;
-  --wp-annotation-box-border-color: grey;
-  --wp-annotation-current-background-color: #ebf4f6;
-  --wp-annotation-icon-hover-color: orange; }
+  --wp-fade-background-color: rgba(255, 255, 255, 0.05);
+  --wp-channel-color: #4a4a5a;
+  --wp-channel-progress-color: #667eea;
+  --wp-cursor-color: #667eea;
+  --wp-selection-background-color: rgba(102, 126, 234, 0.2);
+  --wp-selection-point-color: #ff6b6b;
+  --wp-tracks-container-background-color: #141414;
+  --wp-range-slider-label-color: #888;
+  --wp-range-slider-color: #667eea;
+  --wp-range-slider-focus-color: #8b9cf7;
+  --wp-range-slider-background-color: #333;
+  --wp-range-slider-background-focus-color: #444;
+  --wp-annotation-box-border-color: #555;
+  --wp-annotation-current-background-color: #1f2937;
+  --wp-annotation-icon-hover-color: #667eea; }
 
 .playlist {
   margin: 2em 0; }

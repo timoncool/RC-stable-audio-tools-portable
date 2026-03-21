@@ -371,7 +371,13 @@ EDITOR_INIT_JS = """
         ee.on('finished', function() {
             if (isLooping) {
                 setTimeout(function() {
-                    if (isLooping) { ee.emit('play'); }
+                    if (isLooping) {
+                        if (selStart < selEnd) {
+                            ee.emit('play', selStart, selEnd);
+                        } else {
+                            ee.emit('play');
+                        }
+                    }
                 }, 50);
             }
         });
@@ -384,9 +390,40 @@ EDITOR_INIT_JS = """
             }
         });
 
-        // Русификация встроенных контролов waveform-playlist
-        container.querySelectorAll('.btn-mute').forEach(function(b) { b.textContent = 'Тихо'; });
-        container.querySelectorAll('.btn-solo').forEach(function(b) { b.textContent = 'Соло'; });
+        // Кастомизация контролов: M/S/корзина/дубликат
+        container.querySelectorAll('.btn-mute').forEach(function(b) { b.textContent = 'M'; b.title = 'Mute'; });
+        container.querySelectorAll('.btn-solo').forEach(function(b) { b.textContent = 'S'; b.title = 'Solo'; });
+        container.querySelectorAll('.btn-danger').forEach(function(b) {
+            b.innerHTML = '&#x2715;';
+            b.title = 'Удалить';
+        });
+
+        // Добавляем кнопку дублирования на каждый трек
+        container.querySelectorAll('.controls').forEach(function(ctrl, idx) {
+            var btnGroup = ctrl.querySelector('.btn-group');
+            if (btnGroup && !btnGroup.querySelector('.btn-duplicate')) {
+                var dupBtn = document.createElement('button');
+                dupBtn.className = 'btn btn-duplicate';
+                dupBtn.innerHTML = '&#x2398;';
+                dupBtn.title = 'Дублировать';
+                dupBtn.onclick = function() {
+                    // Получаем данные трека и дублируем
+                    var tracks = playlist.tracks;
+                    if (tracks && tracks[idx]) {
+                        var track = tracks[idx];
+                        var src = track.src || track.buffer;
+                        var name = track.name ? track.name + ' (copy)' : 'Copy';
+                        var startTime = (track.startTime || 0) + (track.endTime - track.startTime || 2);
+                        var loadData = [{ src: src, name: name, start: startTime }];
+                        if (track.buffer) {
+                            // Use AudioBuffer directly
+                            ee.emit('newtrack', track.buffer);
+                        }
+                    }
+                };
+                btnGroup.appendChild(dupBtn);
+            }
+        });
     });
 }
 """
@@ -459,11 +496,90 @@ def build_ui():
         overflow: hidden;
     }
     #wp-container .playlist .controls {
-        background: #1f1f1f !important;
+        background: #1a1a1a !important;
         color: #ccc !important;
+        border-color: #333 !important;
     }
     #wp-container .playlist .controls .track-header {
+        color: #e0e0e0 !important;
+        font-size: 0.8rem;
+    }
+    #wp-container .playlist .controls .btn-mute,
+    #wp-container .playlist .controls .btn-solo {
+        width: 28px !important;
+        height: 22px !important;
+        padding: 0 !important;
+        font-size: 0.75rem !important;
+        font-weight: 700 !important;
+        border-radius: 3px !important;
+        line-height: 22px !important;
+        text-align: center !important;
+    }
+    #wp-container .playlist .controls .btn-mute {
+        background: transparent !important;
+        border: 1px solid #555 !important;
+        color: #999 !important;
+    }
+    #wp-container .playlist .controls .btn-mute:hover,
+    #wp-container .playlist .controls .btn-mute.active {
+        background: #e04050 !important;
+        border-color: #e04050 !important;
         color: #fff !important;
+    }
+    #wp-container .playlist .controls .btn-solo {
+        background: transparent !important;
+        border: 1px solid #555 !important;
+        color: #999 !important;
+    }
+    #wp-container .playlist .controls .btn-solo:hover,
+    #wp-container .playlist .controls .btn-solo.active {
+        background: #667eea !important;
+        border-color: #667eea !important;
+        color: #fff !important;
+    }
+    #wp-container .playlist .controls .btn-danger {
+        width: 24px !important;
+        height: 22px !important;
+        padding: 0 !important;
+        font-size: 0.8rem !important;
+        border-radius: 3px !important;
+        background: transparent !important;
+        border: 1px solid #555 !important;
+        color: #888 !important;
+    }
+    #wp-container .playlist .controls .btn-danger:hover {
+        background: #e04050 !important;
+        border-color: #e04050 !important;
+        color: #fff !important;
+    }
+    #wp-container .playlist .controls .btn-duplicate {
+        width: 24px;
+        height: 22px;
+        padding: 0;
+        font-size: 0.8rem;
+        font-weight: 700;
+        border-radius: 3px;
+        background: transparent;
+        border: 1px solid #555;
+        color: #888;
+        cursor: pointer;
+        margin-left: 2px;
+    }
+    #wp-container .playlist .controls .btn-duplicate:hover {
+        background: #667eea;
+        border-color: #667eea;
+        color: #fff;
+    }
+    #wp-container .playlist .controls .btn-group {
+        gap: 3px;
+        display: flex;
+        align-items: center;
+    }
+    #wp-container .playlist .controls input[type="range"] {
+        width: 80% !important;
+    }
+    #wp-container .playlist .playlist-time-scale {
+        background: #141414;
     }
     """
 
@@ -686,8 +802,7 @@ def build_ui():
                 sampler_type_val, sigma_min_val, sigma_max_val,
                 cfg_rescale_val, use_init_val, init_audio_val, init_noise_level_val,
             )
-            audio_out = gr.Audio(value=file_path, autoplay=autoplay_val)
-            return audio_out, specs, pr, midi, status, file_path
+            return gr.update(value=file_path, autoplay=autoplay_val), specs, pr, midi, status, file_path
 
         generate_btn.click(
             fn=do_generate_wrap,
