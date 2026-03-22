@@ -124,4 +124,4 @@ Foundation-Music-Lab/
 
 > **Если проект полезен — поставьте звёздочку!** Это помогает другим находить проект и мотивирует на развитие.
 
-[![Star History Chart](https://api.star-history.com/svg?repos=timoncool/Foundation-Music-Lab&type=Date)](https://star-history.com/#timoncool/Foundation-Music-Lab&Date)
+[![Star History Chart](https://api.star-history.com/svg?repos=timoncool/Foundation-Music-Lab&type=Date&v=1)](https://star-history.com/#timoncool/Foundation-Music-Lab&Date)
